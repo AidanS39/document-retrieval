@@ -77,13 +77,6 @@ def convert_docs_to_texts(doc_paths: list[Path]):
 
     return texts
 
-def sanitize_string(string: str) -> str:
-    return re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', string)
-
-def sanitize_strings(strings: list[str]) -> list[str]:
-    # Strip null bytes and non-printable control characters, keeping \t, \n, \r
-    return [sanitize_string(s) for s in strings]
-
 def convert_doc_to_images(doc_path: Path, images_dir: Path, dpi: int):
     if not doc_path.is_file():
         raise FileNotFoundError(f"Not a file: {doc_path}")
@@ -177,61 +170,3 @@ def get_images_metadata(images_dir: Path, metadata_path: Path):
     )
     metadata.to_csv(metadata_path, index=False)
     return image_paths, page_doc_paths, page_nums
-
-
-# image generator, automatically opens and closes image
-# def get_images(images_dir: Path, batch_size):
-#     batch_count = 0
-#     batch_images = list()
-#     batch_pages = list()
-#     batch_docs = list()
-#     batch_paths = list()
-#     for doc_path in images_dir.iterdir():
-#         doc = doc_path.stem
-#         if doc_path.is_dir():
-#             for image_path in doc_path.iterdir():
-#                 image = Image.open(image_path)
-#                 page = image_path.stem[-1]
-#
-#                 batch_images.append(image)
-#                 batch_pages.append(page)
-#                 batch_docs.append(doc)
-#                 batch_paths.append(image_path)
-#                 batch_count += 1
-#
-#                 if batch_count >= batch_size:
-#                     yield {
-#                         "images": batch_images,
-#                         "pages": batch_pages,
-#                         "docs": batch_docs,
-#                         "paths": batch_paths
-#                     }
-#                     for batch_image in batch_images:
-#                         batch_image.close()
-#                     batch_count = 0
-#                     batch_images.clear()
-#                     batch_pages.clear()
-#                     batch_docs.clear()
-#                     batch_paths.clear()
-#
-# def get_texts(docs_dir: Path, texts_path: Path) -> list[str]:
-#     doc_names = list()
-#     texts = list()
-#
-#     start_time = time.time()
-#     if texts_path.is_file():
-#         df = pd.read_csv(texts_path)
-#         print(f"data read from {texts_path}")
-#         for doc_path in docs_dir.iterdir():
-#             doc_names.append(doc_path.name)
-#     else:
-#         print("texts file not found, starting document text extraction.")
-#         texts = convert_docs_to_texts(docs_dir)
-#         end_time = time.time()
-#         print(f"time to extract text: {(end_time - start_time):.5f} seconds")
-#
-#         df = pd.DataFrame({"doc_name": doc_names, "text": texts})
-#         df.to_csv(texts_path, index=False)
-#         print(f"data saved at {texts_path}")
-#
-#     return df
