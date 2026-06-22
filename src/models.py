@@ -23,4 +23,5 @@ class Page(Base):
     document: Mapped["Document"] = relationship(back_populates="pages")
     image_path: Mapped[str]
     number: Mapped[int]
-    embedding: Mapped[Optional[VECTOR]] = mapped_column(VECTOR(768)) # dense embeddings for bi-encoder
+    is_corrupt: Mapped[bool] = mapped_column(default=False)
+    embedding: Mapped[Optional[VECTOR]] = mapped_column(VECTOR(2048)) # dense embeddings for bi-encoder

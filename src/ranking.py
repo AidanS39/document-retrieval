@@ -3,217 +3,300 @@ import pandas as pd
 import bm25s
 from sklearn.metrics.pairwise import cosine_similarity
 from scipy.sparse import csr_matrix
-from fast_plaid import filtering
-from sqlalchemy.orm import Session
-from sqlalchemy import delete
+from sqlalchemy import select, delete
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, joinedload
 import time
+from fast_plaid import filtering
 from pathlib import Path
-import torch
 from sentence_transformers import SentenceTransformer
 
 from models import Document, Page
-from embed import embed_pages
-from embed import TfIdfDocEmbedder, BM25DocEmbedder, BiEncoderPageEmbedder
+from embed import (
+    ColDocEmbedder,
+    TfIdfDocEmbedder,
+    BM25DocEmbedder,
+    BiEncoderPageEmbedder,
+)
 from utils import timefunction
 
-class DocRank():
+
+class DocRank:
     def __init__(self, doc: Document, position: int, score: float):
         self.doc = doc
         self.position = position
         self.score = score
-    
-class DocRanking():
+
+
+class DocRanking:
     def __init__(self, query: str, ranks: list[DocRank]):
         self.query = query
         self.ranks = ranks
 
     def __str__(self):
-        lines = [f"Query: {self.query}", f"{'Rank':<6} {'Score':<10} {'ID':<6} Name", "-" * 50]
+        lines = [
+            f"Query: {self.query}",
+            f"{'Rank':<6} {'Score':<10} {'ID':<6} Name",
+            "-" * 50,
+        ]
         for rank in self.ranks:
-            lines.append(f"{rank.position:<6} {rank.score:<10.4f} {rank.doc.id:<6} {rank.doc.name}")
+            lines.append(
+                f"{rank.position:<6} {rank.score:<10.4f} {rank.doc.id:<6} {rank.doc.name}"
+            )
         return "\n".join(lines) + "\n"
 
     @classmethod
-    def from_tuples(cls, query: str, rank_tuples: list[tuple[Document, float]]):
-        sorted_tuples = sorted(rank_tuples, key=lambda t: t[1], reverse=True)
+    def from_tuples(cls, query: str, rank_tuples: list[tuple[int, float]], engine):
+        rank_tuples = sorted(rank_tuples, key=lambda t: t[1], reverse=True)
+
+        doc_ids = list()
+        scores = list()
+        for doc_id, score in rank_tuples:
+            doc_ids.append(doc_id)
+            scores.append(score)
+
+        with Session(engine) as session:
+            stmt = select(Document).where(Document.id.in_(doc_ids))
+            docs = session.scalars(stmt).all()
+
+        # order docs in same order as doc_ids
+        id_to_doc = {doc.id: doc for doc in docs}
+        docs = [id_to_doc[doc_id] for doc_id in doc_ids]
+
         ranks = [
             DocRank(doc=doc, position=i + 1, score=score)
-            for i, (doc, score) in enumerate(sorted_tuples)
+            for i, (doc, score) in enumerate(zip(docs, scores))
         ]
         return cls(query, ranks)
 
-class PageRank():
+
+class PageRank:
     def __init__(self, page: Page, position: int, score: float):
         self.page = page
         self.position = position
         self.score = score
-    
-class PageRanking():
+
+
+class PageRanking:
     def __init__(self, query: str, ranks: list[PageRank]):
         self.query = query
         self.ranks = ranks
 
     def __str__(self):
-        lines = [f"Query: {self.query}", f"{'Rank':<6} {'Score':<10} {'ID':<6} Document Name", "-" * 50]
+        lines = [
+            f"Query: {self.query}",
+            f"{'Rank':<6} {'Score':<10} {'ID':<6} {'Name':<20} {'Page':<4} ",
+            "-" * 50,
+        ]
         for rank in self.ranks:
-            lines.append(f"{rank.position:<6} {rank.score:<10.4f} {rank.page.id:<6} {rank.page.document.name}")
+            lines.append(
+                f"{rank.position:<6} {rank.score:<10.4f} {rank.page.id:<6} {rank.page.document.name:<20} {rank.page.number}"
+            )
         return "\n".join(lines)
 
     @classmethod
-    def from_tuples(cls, query: str, rank_tuples: list[tuple[Page, float]]):
-        sorted_tuples = sorted(rank_tuples, key=lambda t: t[1], reverse=True)
+    def from_tuples(cls, query: str, rank_tuples: list[tuple[int, float]], engine):
+        rank_tuples = sorted(rank_tuples, key=lambda t: t[1], reverse=True)
+
+        page_ids = list()
+        scores = list()
+        for page_id, score in rank_tuples:
+            page_ids.append(page_id)
+            scores.append(score)
+
+        with Session(engine) as session:
+            stmt = select(Page).where(Page.id.in_(page_ids))
+            pages = session.scalars(stmt).all()
+
+        # order docs in same order as doc_ids
+        id_to_page = {page.id: page for page in pages}
+        pages = [id_to_page[page_id] for page_id in page_ids]
+
         ranks = [
             PageRank(page=page, position=i + 1, score=score)
-            for i, (page, score) in enumerate(sorted_tuples)
+            for i, (page, score) in enumerate(zip(pages, scores))
         ]
         return cls(query, ranks)
+
 
 class DocRanker(ABC):
     def __init__(self):
         pass
-    
+
     @abstractmethod
     def rank(self, queries: list[str], top_k: int = 100) -> list[DocRanking]:
         pass
 
+
 class PageRanker(ABC):
     def __init__(self):
         pass
-    
+
     @abstractmethod
     def rank(self, queries: list[str], top_k: int = 100) -> list[PageRanking]:
         pass
 
+
 class TfIdfDocRanker(DocRanker):
     embedder: TfIdfDocEmbedder
-    docs: list[Document]
+    doc_ids: list[int]
     doc_embeddings: csr_matrix
-    
-    def __init__(self):
+    engine: Engine
+
+    def __init__(self, engine):
         self.embedder = TfIdfDocEmbedder()
-    
+        self.engine = engine
+
     @timefunction
-    def fit(self, docs: list[Document]):
-        self.docs = docs
-        self.doc_embeddings = self.embedder.embed_docs(docs)
-    
+    def fit(self, doc_ids: list[int]):
+        self.doc_ids = doc_ids
+        self.doc_embeddings = self.embedder.embed_docs(doc_ids, self.engine)
+
     @timefunction
     def rank(self, queries: list[str], top_k: int = 100) -> list[DocRanking]:
         query_embeddings = self.embedder.embed_queries(queries)
 
         all_scores = cosine_similarity(query_embeddings, self.doc_embeddings)
-        
+
         rankings = list()
 
-        for i, scores in enumerate(all_scores):
-            score_tuples = [(self.docs[j], score) for j, score in enumerate(scores[:top_k])]
-            rankings.append(DocRanking.from_tuples(queries[i], score_tuples))
+        for query_i, scores in enumerate(all_scores):
+            score_tuples = [
+                (self.doc_ids[doc_i], score)
+                for doc_i, score in enumerate(scores[:top_k])
+            ]
+            rankings.append(
+                DocRanking.from_tuples(queries[query_i], score_tuples, self.engine)
+            )
 
         return rankings
-        
+
+
 class BM25DocRanker(DocRanker):
     embedder: BM25DocEmbedder
-    docs: list[Document]
-    
-    def __init__(self):
+    doc_ids: list[int]
+    engine: Engine
+
+    def __init__(self, engine):
         super().__init__()
         self.embedder = BM25DocEmbedder()
-    
+        self.engine = engine
+
     @timefunction
-    def fit(self, docs: list[Document]):
-        self.docs = docs
-        self.embedder.embed_docs(docs)
-    
+    def fit(self, doc_ids: list[int]):
+        self.doc_ids = doc_ids
+        self.embedder.embed_docs(doc_ids, self.engine)
+
     @timefunction
     def rank(self, queries: list[str], top_k: int = 100) -> list[DocRanking]:
         query_tokens = bm25s.tokenize(queries)
 
         results_indices, scores = self.embedder.index.retrieve(query_tokens, k=top_k)
-        
+
         rankings = list()
 
         for query_i, result_indices in enumerate(results_indices):
-            score_tuples = [(self.docs[doc_index], scores[query_i][result_i]) for (result_i, doc_index) in enumerate(result_indices)]
-            rankings.append(DocRanking.from_tuples(queries[query_i], score_tuples))
-        
+            score_tuples = [
+                (self.doc_ids[doc_i], scores[query_i][result_i])
+                for (result_i, doc_i) in enumerate(result_indices)
+            ]
+            rankings.append(
+                DocRanking.from_tuples(queries[query_i], score_tuples, self.engine)
+            )
+
         return rankings
+
 
 class BiEncoderPageRanker(PageRanker):
-    embedder: BiEncoderPageEmbedder
-    pages: list[Page]
-    page_embeddings: torch.Tensor
-
-    def __init__(self, embed_model: SentenceTransformer, embedder_name: str, data_dir: Path = Path("../data")):
+    def __init__(
+        self,
+        engine,
+        embed_model: SentenceTransformer,
+        embedder_name: str,
+        data_dir: Path = Path("../data"),
+    ):
+        self.engine = engine
         self.embedder = BiEncoderPageEmbedder(embed_model, embedder_name, data_dir)
-    
-    def fit(self, pages: list[Page]):
-        self.pages = pages
-        self.page_embeddings = self.embedder.embed_pages(pages)
-    
+
+    def fit(self, page_ids: list[int]):
+        self.embedder.embed_pages(page_ids, self.engine)
+
+    @timefunction
     def rank(self, queries: list[str], top_k: int = 100) -> list[PageRanking]:
         query_embeddings = self.embedder.embed_queries(queries)
-        scores_matrix = self.embedder.model.similarity(query_embeddings, self.page_embeddings)
-        print(scores_matrix.shape)
-        all_scores = torch.unbind(scores_matrix, dim=0)
-        
-        rankings = list()
 
-        for query_i, scores in enumerate(all_scores):
-            score_tuples = [(self.pages[page_i], score.item()) for page_i, score in enumerate(scores[:top_k])]
-            rankings.append(PageRanking.from_tuples(queries[query_i], score_tuples))
+        query_results = []
+        with Session(self.engine) as session:
+            for query_embedding in query_embeddings:
+                vec = query_embedding.cpu().tolist()
+                rows = session.execute(
+                    select(
+                        Page.id,
+                        (1 - Page.embedding.cosine_distance(vec)).label("score"),
+                    )
+                    .options(joinedload(Page.document))
+                    .where(Page.embedding.isnot(None))
+                    .order_by(Page.embedding.cosine_distance(vec))
+                    .limit(top_k)
+                ).all()
+                query_results.append(rows)
+
+        rankings = []
+        for query, rows in zip(queries, query_results):
+            score_tuples = [(page_id, score) for page_id, score in rows]
+            rankings.append(PageRanking.from_tuples(query, score_tuples, self.engine))
 
         return rankings
 
-# TODO: implement
-class CrossEncoderPageRanker(PageRanker):
-    def __init__(self):
-        super().__init__()
-    def rank(self, queries: list[str], top_k: int = 100) -> list[PageRanking]:
-        pass
 
-# TODO: implement
 class ColDocRanker(DocRanker):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, embed_model, index, engine: Engine):
+        self.embedder = ColDocEmbedder(embed_model)
+        self.index = index
+        self.engine = engine
+
+    def fit(self, doc_ids: list[int]):
+        self.embedder.embed_docs(doc_ids, self.engine, self.index)
+
     def rank(self, queries: list[str], top_k: int = 100) -> list[DocRanking]:
-        pass
-    
+        query_embeddings = self.embedder.embed_queries(queries)
+
+        print(f"query embedding shape: {query_embeddings.shape}")
+
+        scores = self.index.search(queries_embeddings=query_embeddings, top_k=100)
+
+        index_ids = list({pid for query_scores in scores for pid, _ in query_scores})
+        index_to_doc_id = get_index_to_doc_id_mapping(self.index, index_ids)
+
+        rankings = list()
+        for query_i, query_scores in enumerate(scores):
+            score_tuples = [
+                (index_to_doc_id[index_id], score)
+                for index_id, score in query_scores[:top_k]
+                if index_id in index_to_doc_id
+            ]
+            rankings.append(
+                DocRanking.from_tuples(queries[query_i], score_tuples, self.engine)
+            )
+
+        return rankings
+
+
 # TODO: implement
-class ColPageRanker(PageRanker):
-    def __init__(self):
-        super().__init__()
-    def rank(self, queries: list[str], top_k: int = 100) -> list[PageRanking]:
-        pass
+# class ColPageRanker(PageRanker):
+#     def __init__(self):
+#         super().__init__()
+#     def rank(self, queries: list[str], top_k: int = 100) -> list[PageRanking]:
+#         pass
 
-# ranks query relevance on individual pages of document
-def bi_encoder_rank(pages, queries: list[str], model, embeddings_dir: Path):
-    
-    image_paths = list()
-    doc_names = list()
-    page_nums = list()
 
-    for page in pages:
-        image_paths.append(page[0])
-        doc_names.append(page[1])
-        page_nums.append(page[2])
+# TODO: implement
+# class CrossEncoderPageRanker(PageRanker):
+#     def __init__(self):
+#         super().__init__()
+#     def rank(self, queries: list[str], top_k: int = 100) -> list[PageRanking]:
+#         pass
 
-    start_time = time.time()
-    page_embeddings_path = embeddings_dir / "doc_embeddings.pt"
-    
-    page_embeddings = embed_pages(model, page_embeddings_path, image_paths)
-
-    print("calculating query embeddings...")
-    query_embeddings = model.encode(queries, convert_to_tensor=True)
-    print(query_embeddings.shape, page_embeddings.shape)
-
-    print("calculating similarity scores...")
-    scores = model.similarity(query_embeddings, page_embeddings)[0].tolist()
-
-    results = pd.DataFrame({"image_path": image_paths, "score": scores})
-    end_time = time.time()
-    print(f"time to rank docs: {end_time - start_time} seconds")
-
-    return results
 
 def delete_docs(engine, index, doc_ids: list[int]) -> None:
     index_ids = sorted(get_doc_index_ids(index, doc_ids))
@@ -223,6 +306,7 @@ def delete_docs(engine, index, doc_ids: list[int]) -> None:
         index.delete(index_ids)
         session.commit()
 
+
 def delete_pages(engine, index, page_ids: list[int]) -> None:
     index_ids = sorted(get_page_index_ids(index, page_ids))
 
@@ -231,65 +315,54 @@ def delete_pages(engine, index, page_ids: list[int]) -> None:
         index.delete(index_ids)
         session.commit()
 
+
 def get_doc_ids(index, index_ids: list[int]) -> list[int]:
     metadata_rows = filtering.get(index=index.index, subset=index_ids)
     return [row["doc_id"] for row in metadata_rows]
 
+
 def get_doc_index_ids(index, doc_ids: list[int]) -> list[int]:
     placeholders = ", ".join(["?"] * len(doc_ids))
-    metadata_rows = filtering.get(index=index.index, condition=f"doc_id IN ({placeholders})", parameters=doc_ids)
+    metadata_rows = filtering.get(
+        index=index.index, condition=f"doc_id IN ({placeholders})", parameters=doc_ids
+    )
     return [row["_subset_"] for row in metadata_rows]
 
-def get_index_to_doc_mapping(index, index_ids: list[int]) -> dict[int, int]:
+
+def get_index_to_doc_id_mapping(index, index_ids: list[int]) -> dict[int, int]:
     metadata_rows = filtering.get(index=index.index, subset=index_ids)
     return {row["_subset_"]: row["doc_id"] for row in metadata_rows}
 
+
 def get_doc_to_index_mapping(index, doc_ids: list[int]) -> dict[int, int]:
     placeholders = ", ".join(["?"] * len(doc_ids))
-    metadata_rows = filtering.get(index=index.index, condition=f"doc_id IN ({placeholders})", parameters=doc_ids)
+    metadata_rows = filtering.get(
+        index=index.index, condition=f"doc_id IN ({placeholders})", parameters=doc_ids
+    )
     return {row["doc_id"]: row["_subset_"] for row in metadata_rows}
+
 
 def get_page_ids(index, index_ids: list[int]) -> list[int]:
     metadata_rows = filtering.get(index=index.index, subset=index_ids)
     return [row["page_id"] for row in metadata_rows]
 
+
 def get_page_index_ids(index, page_ids: list[int]) -> list[int]:
     placeholders = ", ".join(["?"] * len(page_ids))
-    metadata_rows = filtering.get(index=index.index, condition=f"page_id IN ({placeholders})", parameters=page_ids)
+    metadata_rows = filtering.get(
+        index=index.index, condition=f"page_id IN ({placeholders})", parameters=page_ids
+    )
     return [row["_subset_"] for row in metadata_rows]
+
 
 def get_index_to_page_mapping(index, index_ids: list[int]) -> dict[int, int]:
     metadata_rows = filtering.get(index=index.index, subset=index_ids)
     return {row["_subset_"]: row["page_id"] for row in metadata_rows}
 
+
 def get_page_to_index_mapping(index, page_ids: list[int]) -> dict[int, int]:
     placeholders = ", ".join(["?"] * len(page_ids))
-    metadata_rows = filtering.get(index=index.index, condition=f"page_id IN ({placeholders})", parameters=page_ids)
+    metadata_rows = filtering.get(
+        index=index.index, condition=f"page_id IN ({placeholders})", parameters=page_ids
+    )
     return {row["page_id"]: row["_subset_"] for row in metadata_rows}
-
-@timefunction
-def col_rank(index, embed_model, queries: list[str]):
-    queries_embeddings = embed_model.forward_queries(queries, batch_size=1)
-
-    print(f"query embedding shape: {queries_embeddings.shape}")
-
-    start_time = time.time()
-    scores = index.search(queries_embeddings=queries_embeddings, top_k=100)
-    end_time = time.time()
-    print(f"search took {end_time - start_time} seconds.")
-
-    start_time = time.time()
-    all_index_ids = list({pid for query_scores in scores for pid, _ in query_scores})
-    
-    index_to_doc_id = get_index_to_doc_mapping(index, all_index_ids)
-    
-    results = [
-        [(index_to_doc_id[pid], score) for pid, score in query_scores if pid in index_to_doc_id]
-        for query_scores in scores
-    ]
-    end_time = time.time()
-    print(f"id translation took {end_time - start_time} seconds.")
-
-    print(results)
-    print("END")
-    return results
