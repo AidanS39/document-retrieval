@@ -7,6 +7,10 @@ import pymupdf
 import docx
 from pptx import Presentation
 from pptx.shapes.autoshape import Shape
+from PIL import Image
+from sqlalchemy.orm import Session
+from sqlalchemy import select, insert
+from models import Document, Page
 
 def find_docs(docs_dir: Path) -> list[Path]:
     doc_paths = list()
@@ -77,7 +81,18 @@ def convert_docs_to_texts(doc_paths: list[Path]):
 
     return texts
 
-def convert_doc_to_images(doc_path: Path, images_dir: Path, dpi: int):
+def _verify_image(path: Path) -> bool:
+    try:
+        with Image.open(path) as img:
+            img.load()
+        return True
+    except Exception:
+        return False
+
+def _convert_doc_to_images(doc_id: int, doc_path_str: str, images_dir_str: str, dpi: int) -> list[dict]:
+    doc_path = Path(doc_path_str)
+    images_dir = Path(images_dir_str)
+
     if not doc_path.is_file():
         raise FileNotFoundError(f"Not a file: {doc_path}")
     if doc_path.suffix.lower() != ".pdf":
@@ -85,63 +100,67 @@ def convert_doc_to_images(doc_path: Path, images_dir: Path, dpi: int):
 
     image_dir = images_dir / doc_path.stem
     image_dir.mkdir(parents=True, exist_ok=True)
-    
-    skipped = 0
-    converted = 0
-    
-    image_paths = list()
-    doc_paths = list()
-    page_nums = list()
 
+    pages = []
     with pymupdf.open(doc_path) as doc:
-        # clears strutural tags of document (not needed for image conversion)
         doc.xref_set_key(doc.pdf_catalog(), "StructTreeRoot", "null")
-        for page_num in range(0, len(doc)):
+        for page_num in range(len(doc)):
             image_path = image_dir / f"{doc_path.stem}_page_{page_num + 1}.jpg"
-            if image_path.is_file():
-                skipped += 1
-            else:
-                doc[page_num].get_pixmap(dpi=dpi).save(str(image_path))
-                converted += 1
-            image_paths.append(image_path)
-            doc_paths.append(doc_path)
-            page_nums.append(page_num)
-    return image_paths, doc_paths, page_nums, skipped, converted
+            is_corrupt = False
 
-# saves each document as a folder of images, processed in parallel
-def convert_docs_to_images(doc_paths: list, images_dir: Path, dpi: int = 150, max_workers: int = 16):
+            try:
+                doc[page_num].get_pixmap(dpi=dpi).save(str(image_path))
+            except Exception as e:
+                print(f"WARNING: failed to convert page {page_num + 1} of {doc_path.name}: {e}")
+                is_corrupt = True
+
+            if not is_corrupt and not _verify_image(image_path):
+                print(f"WARNING: page {page_num + 1} of {doc_path.name} failed integrity check.")
+                is_corrupt = True
+
+            pages.append({
+                "document_id": doc_id,
+                "image_path": str(image_path),
+                "number": page_num + 1,
+                "is_corrupt": is_corrupt,
+            })
+
+    return pages
+
+def convert_docs_to_images(engine, data_dir: Path, dpi: int = 150, max_workers: int = 16):
+    images_dir = data_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
-    
-    image_paths = list()
-    page_doc_paths = list()
-    page_nums = list()
-    skipped = 0
-    converted = 0
-    failed = list()
+
+    with Session(engine) as session:
+        docs = session.execute(select(Document.id, Document.path)).all()
+
+    all_pages = []
+    failed_docs = []
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
-        future_to_path = {
-            executor.submit(convert_doc_to_images, doc_path, images_dir, dpi): doc_path
-            for doc_path in doc_paths
+        future_to_doc = {
+            executor.submit(_convert_doc_to_images, doc.id, doc.path, str(images_dir), dpi): doc
+            for doc in docs
         }
-        for future in concurrent.futures.as_completed(future_to_path):
-            doc_path = future_to_path[future]
+        for future in concurrent.futures.as_completed(future_to_doc):
+            doc = future_to_doc[future]
             try:
-                cur_image_paths, cur_doc_paths, cur_page_nums, cur_skipped, cur_converted = future.result()
-                image_paths += cur_image_paths
-                page_doc_paths += cur_doc_paths
-                page_nums += cur_page_nums
-                skipped += cur_skipped
-                converted += cur_converted
+                all_pages.extend(future.result())
             except Exception as e:
-                print(f"Error converting {doc_path}: {e}")
-                failed.append(doc_path)
+                print(f"ERROR: failed to convert {doc.path}: {e}")
+                failed_docs.append(doc.path)
 
-    print(f"Done: {converted} pages converted, {skipped} already existed.")
-    if failed:
-        print(f"Failed ({len(failed)}): {failed}")
+    if all_pages:
+        with Session(engine) as session:
+            session.execute(insert(Page), all_pages)
+            session.commit()
 
-    return image_paths, page_doc_paths, page_nums
+    corrupt_count = sum(1 for p in all_pages if p["is_corrupt"])
+    print(f"Done: {len(all_pages)} pages from {len(docs) - len(failed_docs)} documents. {corrupt_count} corrupt page(s).")
+    if failed_docs:
+        print(f"Failed documents ({len(failed_docs)}): {failed_docs}")
+
+    return len(all_pages), corrupt_count
 
 # gets image paths and corresponding document name and page number from images folder
 def get_images_metadata(images_dir: Path, metadata_path: Path):
