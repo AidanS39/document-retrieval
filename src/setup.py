@@ -15,8 +15,8 @@ from utils import sanitize_strings, sanitize_string
 from utils import get_device, timefunction
 from utils import get_col_embedding_model
 from models import Base, Document, Page
-from embed import BiEncoderPageEmbedder
-from embed import col_embed_docs, col_embed_pages
+from embed import BiEncoderPageEmbedder, ColDocEmbedder
+from embed import col_embed_pages
 
 load_dotenv()
 
@@ -27,97 +27,91 @@ DB_HOST = os.getenv("DB_HOST")
 DB_PORT = int(os.getenv("DB_PORT", "5432"))
 DB_DATABASE = os.getenv("DB_DATABASE")
 
-class Setup():
+
+class Setup:
     def __init__(self, engine: Engine, data_dir: Path = Path("../data")):
         self.engine = engine
         self.data_dir = data_dir
-    
+
     @timefunction
     def setup_db(self, overwrite: bool = False):
         # add pgvector extension
         with Session(self.engine) as session:
-            session.execute(text('CREATE EXTENSION IF NOT EXISTS vector'))
+            session.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             session.commit()
-        
+
         # creates all defined tables in db from imported models
         if overwrite:
             # NOTE: drops existing tables!
             Base.metadata.drop_all(self.engine)
         Base.metadata.create_all(self.engine)
-    
+
     @timefunction
     def seed_db(self):
         docs_dir = self.data_dir / "documents"
-        images_dir = self.data_dir / "images"
 
         doc_paths = find_docs(docs_dir)
         texts = convert_docs_to_texts(doc_paths)
         texts = sanitize_strings(texts)
-        
+
         docs = [
             {
                 "name": sanitize_string(doc_paths[i].stem),
                 "path": sanitize_string(str(doc_paths[i])),
-                "text": texts[i]
-            } 
+                "text": texts[i],
+            }
             for i in range(len(doc_paths))
         ]
-        
-        image_paths, page_doc_paths, page_nums = convert_docs_to_images(doc_paths, images_dir)
 
         with Session(self.engine) as session:
-            stmt = insert(Document).returning(Document.id, Document.path)
-            result = session.execute(stmt, docs)
-            
-            doc_id_map = {doc.path: doc.id for doc in result}
-
-            pages = [
-                {
-                    "image_path": str(image_paths[i]),
-                    "document_id": doc_id_map[str(page_doc_paths[i])],
-                    "number": page_nums[i]
-                } 
-                for i in range(len(image_paths))
-            ]
-
-            result = session.execute(insert(Page).returning(Page.id), pages)
+            session.execute(insert(Document), docs)
             session.commit()
+
+        convert_docs_to_images(self.engine, self.data_dir)
 
     @timefunction
     def setup_page_embeddings(self, embedder: BiEncoderPageEmbedder):
         with Session(self.engine) as session:
-            stmt = select(Page)
-            pages = list(session.scalars(stmt).all())
+            stmt = select(Page.id)
+            page_ids = list(session.scalars(stmt).all())
 
-        embedder.embed_pages(pages)
-    
+        embedder.embed_pages(page_ids, self.engine)
+
     @timefunction
-    def setup_col_embeddings(self, model_name: str, index_name: str, page_granularity: bool = False):
+    def setup_col_embeddings(
+        self, model_name: str, index_name: str, page_granularity: bool = False
+    ):
         models_dir = self.data_dir / "models"
         indexes_dir = self.data_dir / "indexes"
-        
+
         device = get_device()
 
         col_embed_model = get_col_embedding_model(models_dir, model_name, device)
-        
+
         if page_granularity:
             index_path = indexes_dir / (index_name + "_pages")
-            index = search.FastPlaid(index=str(index_path), device="cuda", low_memory=False)
-            
+            index = search.FastPlaid(
+                index=str(index_path), device="cuda", low_memory=False
+            )
+
             with Session(self.engine) as session:
                 stmt = select(Page.id)
                 page_ids = list(session.scalars(stmt).all())
-                
+
             col_embed_pages(self.engine, col_embed_model, index, page_ids)
         else:
             index_path = indexes_dir / (index_name + "_docs")
-            index = search.FastPlaid(index=str(index_path), device="cuda", low_memory=False)
-            
+            index = search.FastPlaid(
+                index=str(index_path), device="cuda", low_memory=False
+            )
+
             with Session(self.engine) as session:
                 stmt = select(Document.id)
                 doc_ids = list(session.scalars(stmt).all())
-                
-            col_embed_docs(self.engine, col_embed_model, index, doc_ids)
+
+            embedder = ColDocEmbedder(col_embed_model)
+            embedder.embed_docs(doc_ids, self.engine, index)
+
 
 # def setup(data_dir: Path, conn_url, index_name: str):
 #     engine = create_engine(conn_url)
@@ -140,6 +134,7 @@ class Setup():
 #     setup_col_embeddings(engine, data_dir, model_name, index_name, page_granularity=True)
 #     print("col embeddings were computed successfully.")
 
+
 def main():
     data_dir = Path("../data")
 
@@ -149,28 +144,28 @@ def main():
         password=DB_PASSWORD,
         host=DB_HOST,
         port=DB_PORT,
-        database=DB_DATABASE
+        database=DB_DATABASE,
     )
     engine = create_engine(conn_url)
-    
+
     setup = Setup(engine, data_dir)
-    
+
     # setup embeddings for bi-encoder
-    model_name = "Qwen/Qwen3-VL-Embedding-8B"
+    model_name = "Qwen/Qwen3-VL-Embedding-2B"
     embed_name = model_name + "_embedding"
     device = get_device()
-    embedder = BiEncoderPageEmbedder.from_names(model_name, embed_name, device, data_dir)
-    
+    embedder = BiEncoderPageEmbedder.from_names(
+        model_name, embed_name, device, data_dir
+    )
+
+    # setup.setup_db(overwrite=True)
+    # setup.seed_db()
     setup.setup_page_embeddings(embedder)
-    
+
     # setup embeddings for col embedder
     # index_name = "doc_retrieve_index"
     # col_model_name = "nvidia/llama-nemotron-colembed-vl-3b-v2"
-    
+
 
 if __name__ == "__main__":
     main()
-
-
-
-

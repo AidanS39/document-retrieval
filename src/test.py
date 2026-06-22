@@ -9,13 +9,13 @@ from sqlalchemy import delete, select
 from fast_plaid import search, filtering
 
 from models import Document, Page
-from setup import setup
-from utils import get_device, get_embedding_model, get_col_embedding_model
+from setup import Setup
+from utils import get_device, get_col_embedding_model
 from utils import timefunction
-from embed import BiEncoderPageEmbedder
+from embed import BiEncoderPageEmbedder, ColDocEmbedder
 from ranking import BiEncoderPageRanker, delete_docs, delete_pages
 from ranking import col_rank
-from ranking import TfIdfDocRanker, BM25DocRanker
+from ranking import TfIdfDocRanker, BM25DocRanker, ColDocRanker
 
 load_dotenv()
 
@@ -67,21 +67,14 @@ def test_delete_page(engine, data_dir, page_id):
     metadata_rows = filtering.get(index=index.index)
     print(metadata_rows)
 
-def test_setup(conn_url):
-    test_data_dir = Path("../test")
-    index_name = "test_index"
-    conn_url = conn_url.set(database="test")
-    
-    setup(test_data_dir, conn_url, index_name)
-
 @timefunction
 def test_tf_idf(engine, queries):
     with Session(engine) as session:
-        stmt = select(Document)
-        docs = list(session.scalars(stmt).all())
+        stmt = select(Document.id)
+        doc_ids = list(session.scalars(stmt).all())
     
-    ranker = TfIdfDocRanker()
-    ranker.fit(docs)
+    ranker = TfIdfDocRanker(engine)
+    ranker.fit(doc_ids)
     rankings = ranker.rank(queries)
 
     for ranking in rankings:
@@ -90,11 +83,11 @@ def test_tf_idf(engine, queries):
 
 def test_bm25(engine, queries):
     with Session(engine) as session:
-        stmt = select(Document)
-        docs = list(session.scalars(stmt).all())
+        stmt = select(Document.id)
+        doc_ids = list(session.scalars(stmt).all())
     
-    ranker = BM25DocRanker()
-    ranker.fit(docs)
+    ranker = BM25DocRanker(engine)
+    ranker.fit(doc_ids)
     rankings = ranker.rank(queries)
 
     for ranking in rankings:
@@ -102,7 +95,7 @@ def test_bm25(engine, queries):
 
 
 def test_bi_encoder(engine, queries, data_dir):
-    embed_model_name = "Qwen/Qwen3-VL-Embedding-8B"
+    embed_model_name = "Qwen/Qwen3-VL-Embedding-2B"
     
     device = get_device()
 
@@ -110,25 +103,42 @@ def test_bi_encoder(engine, queries, data_dir):
     print(embed_model.modalities)
     
     with Session(engine) as session:
-        stmt = select(Page).join(Page.document)
-        pages = list(session.scalars(stmt).all())
+        stmt = select(Page.id).join(Page.document)
+        page_ids = list(session.scalars(stmt).all())
     
-    ranker = BiEncoderPageRanker(embed_model, "test_bi_encoder", data_dir)
-    ranker.fit(pages)
+    ranker = BiEncoderPageRanker(engine, embed_model, "test_bi_encoder", data_dir)
+    ranker.fit(page_ids)
     rankings = ranker.rank(queries)
 
     for ranking in rankings:
         print(ranking)
 
 
-def test_col(index, queries, data_dir):
-    models_dir = data_dir / "models"
+def test_col(engine, queries: list[str], data_dir: Path = Path("../test")):
     model_name = "nvidia/llama-nemotron-colembed-vl-3b-v2"
     
     device = get_device()
-    col_embed_model = get_col_embedding_model(models_dir, model_name, device)
+    col_embed_model = ColDocEmbedder.get_col_embedding_model(model_name, device)
+    
+    indexes_dir = data_dir / "indexes"
+    index = search.FastPlaid(index=str(indexes_dir / "llama-nemotron-colembed-vl-3b-v2_index"), device="cuda", low_memory=False)
+    
+    with Session(engine) as session:
+        stmt = select(Document.id)
+        doc_ids = list(session.scalars(stmt).all())
 
-    col_rank(index, col_embed_model, queries)
+    ranker = ColDocRanker(col_embed_model, index, engine)
+    ranker.fit(doc_ids)
+    rankings = ranker.rank(queries)
+
+    for ranking in rankings:
+        print(ranking)
+
+
+def test_setup(engine, data_dir: Path = Path("../test")):
+    setup = Setup(engine, data_dir)
+    setup.setup_db(overwrite=True)
+    setup.seed_db()
 
 def main():
     data_dir = Path("../test")
@@ -138,7 +148,8 @@ def main():
     DB_PASSWORD = os.getenv("DB_PASSWORD")
     DB_HOST = os.getenv("DB_HOST")
     DB_PORT = int(os.getenv("DB_PORT", "5432"))
-    DB_DATABASE = os.getenv("DB_DATABASE", "test")
+    # DB_DATABASE = os.getenv("DB_DATABASE", "test")
+    DB_DATABASE = "test"
     
     conn_url = URL.create(
         drivername=DB_DRIVER,
@@ -148,25 +159,23 @@ def main():
         port=DB_PORT,
         database=DB_DATABASE
     )
-
+    
+    print(f"database: {DB_DATABASE}")
     engine = create_engine(conn_url)
     
-    # test_setup(conn_url)
+    # test_setup(engine)
     # test_delete_doc(engine, data_dir, 2)
     # test_delete_page(engine, data_dir, 3)
     
-    # indexes_dir = data_dir / "indexes"
-    # index = search.FastPlaid(index=str(indexes_dir / "doc_retrieve_index"), device="cuda", low_memory=False)
-
     queries = [
         "What is magnetic reconnection?",
         "How does the ramp-up process work?"
     ]
     
-    # test_tf_idf(engine, queries)
-    # test_bm25(engine, queries)
-
+    test_tf_idf(engine, queries)
+    test_bm25(engine, queries)
     test_bi_encoder(engine, queries, data_dir)
+    test_col(engine, queries, data_dir)
     
 
 if __name__ == "__main__":
