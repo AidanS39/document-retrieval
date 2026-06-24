@@ -1,8 +1,10 @@
 import os
 from dotenv import load_dotenv
 from pathlib import Path
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.engine import URL
+from sqlalchemy.orm import Session
+from document_retrieval.models import Document
 
 load_dotenv()
 
@@ -27,6 +29,13 @@ def main():
     )
 
     engine = create_engine(conn_url)
+
+    with Session(engine) as session:
+        stmt = select(Document.id, Document.name).where(Document.id.in_([1, 2, 3]))
+        docs = session.scalars(stmt).all()
+
+    print("hello from main!")
+    print(docs)
 
 
 if __name__ == "__main__":

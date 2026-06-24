@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+**/*.pyc
+**/*.pyo
+.git/
+data/
+.cache/
+plans/
+*.env
+mutagen.yml
+mutagen.yml.lock
