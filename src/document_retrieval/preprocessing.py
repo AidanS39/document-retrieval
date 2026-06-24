@@ -1,6 +1,7 @@
 from pathlib import Path
 from collections import deque
 import concurrent.futures
+import os
 import re
 import pandas as pd
 import pymupdf
@@ -10,7 +11,7 @@ from pptx.shapes.autoshape import Shape
 from PIL import Image
 from sqlalchemy.orm import Session
 from sqlalchemy import select, insert
-from models import Document, Page
+from .models import Document, Page
 
 def find_docs(docs_dir: Path) -> list[Path]:
     doc_paths = list()
@@ -127,7 +128,9 @@ def _convert_doc_to_images(doc_id: int, doc_path_str: str, images_dir_str: str, 
 
     return pages
 
-def convert_docs_to_images(engine, data_dir: Path, dpi: int = 150, max_workers: int = 16):
+def convert_docs_to_images(engine, data_dir: Path, dpi: int = 150, max_workers: int = None):
+    if max_workers is None:
+        max_workers = min(os.cpu_count() or 4, 4)
     images_dir = data_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
 

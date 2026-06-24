@@ -8,14 +8,14 @@ from sqlalchemy import delete, select
 
 from fast_plaid import search, filtering
 
-from models import Document, Page
-from setup import Setup
-from utils import get_device, get_col_embedding_model
-from utils import timefunction
-from embed import BiEncoderPageEmbedder, ColDocEmbedder
-from ranking import BiEncoderPageRanker, delete_docs, delete_pages
-from ranking import col_rank
-from ranking import TfIdfDocRanker, BM25DocRanker, ColDocRanker
+from .models import Document, Page
+from .setup import Setup
+from .utils import get_device, get_col_embedding_model
+from .utils import timefunction
+from .embed import BiEncoderPageEmbedder, ColDocEmbedder
+from .ranking import BiEncoderPageRanker, delete_docs, delete_pages
+from .ranking import col_rank
+from .ranking import TfIdfDocRanker, BM25DocRanker, ColDocRanker
 
 load_dotenv()
 

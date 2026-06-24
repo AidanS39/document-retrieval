@@ -8,7 +8,7 @@ from transformers import AutoModel, AutoProcessor
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from models import Document
+from .models import Document
 
 
 # decorator that prints function execution time

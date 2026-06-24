@@ -11,14 +11,14 @@ from fast_plaid import filtering
 from pathlib import Path
 from sentence_transformers import SentenceTransformer
 
-from models import Document, Page
-from embed import (
+from .models import Document, Page
+from .embed import (
     ColDocEmbedder,
     TfIdfDocEmbedder,
     BM25DocEmbedder,
     BiEncoderPageEmbedder,
 )
-from utils import timefunction
+from .utils import timefunction
 
 
 class DocRank:

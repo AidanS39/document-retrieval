@@ -3,7 +3,7 @@ import torch
 from sqlalchemy.orm import Session
 from sqlalchemy import select, update
 from sqlalchemy.engine import Engine
-from models import Document, Page
+from .models import Document, Page
 from sklearn.feature_extraction.text import TfidfVectorizer
 from scipy.sparse import csr_matrix
 import bm25s
@@ -11,7 +11,7 @@ from sentence_transformers import SentenceTransformer
 from transformers import AutoModel, AutoProcessor
 from transformers.image_utils import load_image
 from fast_plaid import filtering
-from utils import timefunction
+from .utils import timefunction
 import time
 from abc import ABC, abstractmethod
 
