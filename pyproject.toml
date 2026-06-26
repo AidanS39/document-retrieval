@@ -14,23 +14,29 @@ description = "Implementation of a document retrieval system using multiple embe
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "bm25s>=0.3.9",
-    "datasets>=5.0.0",
-    "fast-plaid>=1.4.0",
-    "huggingface-hub>=1.18.0",
-    "pandas>=3.0.3",
-    "peft>=0.19.1",
-    "pgvector>=0.4.2",
-    "pillow>=12.2.0",
-    "psycopg[binary]>=3.3.4",
-    "pymupdf>=1.27.2.3",
-    "python-docx>=1.2.0",
-    "python-dotenv>=1.2.2",
-    "python-pptx>=1.0.2",
-    "scikit-learn>=1.9.0",
-    "sentence-transformers[image]>=5.3.0",
-    "sqlalchemy>=2.0.50",
-    "torch>=2.11.0",
-    "torchvision>=0.26.0",
-    "transformers>=5.3.0",
+  "bm25s>=0.3.9",
+  "datasets>=5.0.0",
+  "fast-plaid>=1.4.0",
+  "huggingface-hub>=1.18.0",
+  "pandas>=3.0.3",
+  "peft>=0.19.1",
+  "pgvector>=0.4.2",
+  "pillow>=12.2.0",
+  "psycopg[binary]>=3.3.4",
+  "pymupdf>=1.27.2.3",
+  "python-docx>=1.2.0",
+  "python-dotenv>=1.2.2",
+  "python-pptx>=1.0.2",
+  "scikit-learn>=1.9.0",
+  "sentence-transformers[image]>=5.3.0",
+  "sqlalchemy>=2.0.50",
+  "torch>=2.11.0",
+  "torchvision>=0.26.0",
+  "transformers>=5.3.0",
 ]
+
+[dependency-groups]
+dev = ["uv-script>=0.1.9"]
+
+[tool.uvs.scripts]
+remote-sync = 'rsync -avhP LOCAL_SYNC_PATH_REDACTED REMOTE_SYNC_URL_REDACTED --filter=":- .gitignore"'

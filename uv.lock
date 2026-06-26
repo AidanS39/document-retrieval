@@ -427,6 +427,11 @@ dependencies = [
     { name = "transformers" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "uv-script" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "bm25s", specifier = ">=0.3.9" },
@@ -449,6 +454,9 @@ requires-dist = [
     { name = "torchvision", specifier = ">=0.26.0", index = "https://download.pytorch.org/whl/cu126" },
     { name = "transformers", specifier = ">=5.3.0" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "uv-script", specifier = ">=0.1.9" }]
 
 [[package]]
 name = "fast-plaid"
@@ -2485,6 +2493,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/65/64/4bd30f33e094525eb8527155425036e73f4c76617047714fc0353c30ede4/usearch-2.25.3-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:e8afcfcd59e6e1493e5ab7eabf36d4838e9102d57db55ee4128fc48e1b8f1899", size = 2456120, upload-time = "2026-05-24T14:55:07.153Z" },
     { url = "https://files.pythonhosted.org/packages/9e/58/5f7ebb891f3ea8b8a1f0c1c95b3a47f3a9eba4748b0c1110957140c10e7c/usearch-2.25.3-cp314-cp314t-win_amd64.whl", hash = "sha256:1cf98c5e23a8509e208f1c0d853e64d54ffeceaeeb12c5b204d2f517f1ac58e7", size = 378234, upload-time = "2026-05-24T14:55:08.914Z" },
     { url = "https://files.pythonhosted.org/packages/01/fe/dc2ddb0048f43c4b4ffb3dd8014451abeae181dfc1194df9e4c5aed153ba/usearch-2.25.3-cp314-cp314t-win_arm64.whl", hash = "sha256:bc6ee460b5030068a414a7390be5916a823b8edfab86ca453daeac47a813b4c0", size = 360590, upload-time = "2026-05-24T14:55:10.512Z" },
+]
+
+[[package]]
+name = "uv-script"
+version = "0.1.9"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/b7/32/4dbefcb9bb6197b588f1edfa6c50d2b18342e8c2b002be796ee3a0453ad3/uv_script-0.1.9.tar.gz", hash = "sha256:fda8dd28a1e037d0f41b5f0a0e7f15dd1ecc3deb03fe799f895fd7be639a81ac", size = 5962, upload-time = "2026-02-12T22:21:42.211Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/82/ba/10dc44db65ce99720c908c0c6c4cca52d8f2f222b67ca91db5d5ccb38062/uv_script-0.1.9-py3-none-any.whl", hash = "sha256:aea2f419f605617e27c6a3b5ce198c043231f79fdc770cdd0feb58258dd2c456", size = 7710, upload-time = "2026-02-12T22:21:40.802Z" },
 ]
 
 [[package]]

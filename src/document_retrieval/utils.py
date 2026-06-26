@@ -42,3 +42,29 @@ def get_device() -> torch.device:
         device = torch.device("cpu")
 
     return device
+
+
+def db_initialized(data_dir: Path = Path("../data")):
+    db_init_path = data_dir / ".db_initialized"
+    if db_init_path.is_file():
+        return True
+    return False
+
+
+def db_seeded(data_dir: Path = Path("../data")):
+    db_seeded_path = data_dir / ".db_seeded"
+    if db_seeded_path.is_file():
+        return True
+    return False
+
+
+def mark_db_as_initialized(data_dir: Path = Path("../data")):
+    db_init_path = data_dir / ".db_initialized"
+    if db_initialized(data_dir) is False:
+        db_init_path.touch(exist_ok=True)
+
+
+def mark_db_as_seeded(data_dir: Path = Path("../data")):
+    db_seeded_path = data_dir / ".db_seeded"
+    if db_seeded(data_dir) is False:
+        db_seeded_path.touch(exist_ok=True)

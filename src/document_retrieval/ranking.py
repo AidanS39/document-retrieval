@@ -14,11 +14,12 @@ from sentence_transformers import SentenceTransformer
 from .models import Document, Page
 from .embed import (
     ColDocEmbedder,
+    ColPageEmbedder,
     TfIdfDocEmbedder,
     BM25DocEmbedder,
     BiEncoderPageEmbedder,
 )
-from .utils import timefunction
+from .utils import timefunction, get_device
 
 
 class DocRank:
@@ -211,12 +212,14 @@ class BiEncoderPageRanker(PageRanker):
     def __init__(
         self,
         engine,
-        embed_model: SentenceTransformer,
+        model_name: str,
         embedder_name: str,
         data_dir: Path = Path("../data"),
     ):
         self.engine = engine
-        self.embedder = BiEncoderPageEmbedder(embed_model, embedder_name, data_dir)
+        self.embedder = BiEncoderPageEmbedder(
+            model_name, embedder_name, get_device(), data_dir
+        )
 
     def fit(self, page_ids: list[int]):
         self.embedder.embed_pages(page_ids, self.engine)
@@ -282,12 +285,37 @@ class ColDocRanker(DocRanker):
         return rankings
 
 
-# TODO: implement
-# class ColPageRanker(PageRanker):
-#     def __init__(self):
-#         super().__init__()
-#     def rank(self, queries: list[str], top_k: int = 100) -> list[PageRanking]:
-#         pass
+class ColPageRanker(PageRanker):
+    def __init__(self, embed_model, index, engine: Engine):
+        self.embedder = ColPageEmbedder(embed_model)
+        self.index = index
+        self.engine = engine
+
+    def fit(self, page_ids: list[int]):
+        self.embedder.embed_pages(page_ids, self.engine, self.index)
+
+    def rank(self, queries: list[str], top_k: int = 100) -> list[PageRanking]:
+        query_embeddings = self.embedder.embed_queries(queries)
+
+        print(f"query embedding shape: {query_embeddings.shape}")
+
+        scores = self.index.search(queries_embeddings=query_embeddings, top_k=100)
+
+        index_ids = list({pid for query_scores in scores for pid, _ in query_scores})
+        index_to_page_id = get_index_to_page_id_mapping(self.index, index_ids)
+
+        rankings = list()
+        for query_i, query_scores in enumerate(scores):
+            score_tuples = [
+                (index_to_page_id[index_id], score)
+                for index_id, score in query_scores[:top_k]
+                if index_id in index_to_page_id
+            ]
+            rankings.append(
+                DocRanking.from_tuples(queries[query_i], score_tuples, self.engine)
+            )
+
+        return rankings
 
 
 # TODO: implement
@@ -355,7 +383,7 @@ def get_page_index_ids(index, page_ids: list[int]) -> list[int]:
     return [row["_subset_"] for row in metadata_rows]
 
 
-def get_index_to_page_mapping(index, index_ids: list[int]) -> dict[int, int]:
+def get_index_to_page_id_mapping(index, index_ids: list[int]) -> dict[int, int]:
     metadata_rows = filtering.get(index=index.index, subset=index_ids)
     return {row["_subset_"]: row["page_id"] for row in metadata_rows}
 
