@@ -12,11 +12,12 @@ from .preprocessing import convert_docs_to_texts
 from .preprocessing import convert_docs_to_images
 from .utils import sanitize_strings, sanitize_string
 from .utils import get_device, timefunction
+from .utils import mark_db_as_initialized, mark_db_as_seeded
 from .models import Base, Document, Page
 from .embed import BiEncoderPageEmbedder, ColDocEmbedder
 
 
-class Setup:
+class DatabaseSetup:
     def __init__(self, conn_url, data_dir: Path = Path("../data")):
         self.conn_url = conn_url
         self.engine = create_engine(conn_url)
@@ -39,7 +40,7 @@ class Setup:
             if not exists:
                 conn.execute(
                     sql.SQL("CREATE DATABASE {}").format(
-                        sql.Identifier(self.conn_url.dbname)
+                        sql.Identifier(str(self.conn_url.database))
                     )
                 )
 
@@ -53,6 +54,8 @@ class Setup:
             # NOTE: drops existing tables!
             Base.metadata.drop_all(self.engine)
         Base.metadata.create_all(self.engine)
+
+        mark_db_as_initialized(self.data_dir)
 
     @timefunction
     def seed_db(self):
@@ -76,6 +79,14 @@ class Setup:
             session.commit()
 
         convert_docs_to_images(self.engine, self.data_dir)
+
+        mark_db_as_seeded(self.data_dir)
+
+
+class EmbeddingSetup:
+    def __init__(self, engine, data_dir: Path = Path("../data")):
+        self.engine = engine
+        self.data_dir = data_dir
 
     @timefunction
     def setup_page_embeddings(self, embedder: BiEncoderPageEmbedder):
