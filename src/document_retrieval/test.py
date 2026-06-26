@@ -5,7 +5,7 @@ from sqlalchemy.engine import URL
 from sqlalchemy.engine import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy import delete, select
-
+import torch
 from fast_plaid import search, filtering
 
 from .models import Document, Page
@@ -17,6 +17,31 @@ from .ranking import BiEncoderPageRanker, delete_docs, delete_pages
 from .ranking import TfIdfDocRanker, BM25DocRanker, ColDocRanker
 
 load_dotenv()
+
+
+class TestUtils:
+    def test_sanitize_string():
+        pass
+
+    def test_sanitize_strings():
+        pass
+
+    def test_get_device():
+        device = get_device()
+
+        assert device == torch.device("cuda")
+
+    def test_db_initialized():
+        pass
+
+    def test_db_seeded():
+        pass
+
+    def test_mark_db_as_initialized():
+        pass
+
+    def test_mark_db_as_seeded():
+        pass
 
 
 def test_delete_doc(engine, data_dir, doc_id):

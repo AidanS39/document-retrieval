@@ -4,8 +4,10 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import List, Optional
 from pgvector.sqlalchemy import VECTOR
 
+
 class Base(DeclarativeBase):
     pass
+
 
 class Document(Base):
     __tablename__ = "document"
@@ -13,15 +15,39 @@ class Document(Base):
     name: Mapped[str]
     path: Mapped[str]
     text: Mapped[Optional[str]]
-    embedding: Mapped[Optional[VECTOR]] = mapped_column(VECTOR(768)) # sparse embeddings, either bm25 or tf-idf
-    pages: Mapped[List["Page"]] = relationship(back_populates="document", cascade="all, delete-orphan")
+    text_failed: Mapped[bool] = mapped_column(
+        default=False
+    )  # whether doc failed to convert to text
+    embedding: Mapped[Optional[VECTOR]] = mapped_column(
+        VECTOR(768)
+    )  # sparse single vector embeddings, either bm25 or tf-idf
+    embedding_failed: Mapped[bool] = mapped_column(
+        default=False
+    )  # whether embedding failed to generate for doc
+    pages: Mapped[List["Page"]] = relationship(
+        back_populates="document", cascade="all, delete-orphan"
+    )
+
 
 class Page(Base):
     __tablename__ = "page"
     id: Mapped[int] = mapped_column(primary_key=True)
-    document_id: Mapped[int] = mapped_column(ForeignKey("document.id", ondelete="CASCADE"))
+    document_id: Mapped[int] = mapped_column(
+        ForeignKey("document.id", ondelete="CASCADE")
+    )
     document: Mapped["Document"] = relationship(back_populates="pages")
     image_path: Mapped[str]
     number: Mapped[int]
-    is_corrupt: Mapped[bool] = mapped_column(default=False)
-    embedding: Mapped[Optional[VECTOR]] = mapped_column(VECTOR(2048)) # dense embeddings for bi-encoder
+    image_failed: Mapped[bool] = mapped_column(
+        default=False
+    )  # whether page failed to convert to image
+    embedding: Mapped[Optional[VECTOR]] = mapped_column(
+        VECTOR(2048)
+    )  # dense single vector embeddings for bi-encoder
+    # NOTE: vector dimension determined by embedding model, may need to change
+    embedding_failed: Mapped[bool] = mapped_column(
+        default=False
+    )  # whether embedding failed to generate for page
+    col_embeddings_failed: Mapped[bool] = mapped_column(
+        default=False
+    )  # whether col embeddings failed to generate for page
