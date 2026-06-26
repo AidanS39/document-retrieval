@@ -4,26 +4,26 @@ services:
     shm_size: '2gb'
     volumes:
       - ./data:/app/data
-    environment:
-      PYTHONUNBUFFERED: "1"
-      DB_DRIVER: postgresql+psycopg
-      DB_USER: postgres
-      DB_PASSWORD: password12345
-      DB_HOST: db
-      DB_PORT: 5432
-      DB_DATABASE: document_retrieval
+      - ./src:/app/src
+    env_file:
+      - .env
     depends_on:
       db:
         condition: service_healthy
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
   db:
     image: pgvector/pgvector:pg17
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password12345
-      POSTGRES_DB: document_retrieval
     volumes:
       - pgdata:/var/lib/postgresql/data
+    env_file:
+      - .env
     ports:
       - "5433:5432"
     healthcheck:
@@ -31,6 +31,28 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+  
+  app-test:
+    build: .
+    shm_size: '2gb'
+    profiles:
+      - test
+    command: uv run python -m document_retrieval.test
+    volumes:
+      - ./test:/app/test
+      - ./src:/app/src
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
 volumes:
   pgdata:
