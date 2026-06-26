@@ -2,8 +2,6 @@ from pathlib import Path
 from collections import deque
 import concurrent.futures
 import os
-import re
-import pandas as pd
 import pymupdf
 import docx
 from pptx import Presentation
@@ -12,6 +10,7 @@ from PIL import Image
 from sqlalchemy.orm import Session
 from sqlalchemy import select, insert
 from .models import Document, Page
+
 
 def find_docs(docs_dir: Path) -> list[Path]:
     doc_paths = list()
@@ -29,6 +28,7 @@ def find_docs(docs_dir: Path) -> list[Path]:
 
     return doc_paths
 
+
 def _pdf_to_text(doc_path: Path) -> str:
     doc = pymupdf.open(doc_path)
     text = ""
@@ -36,9 +36,11 @@ def _pdf_to_text(doc_path: Path) -> str:
         text += str(page.get_text())
     return text
 
+
 def _docx_to_text(doc_path: Path) -> str:
     document = docx.Document(str(doc_path))
     return "\n".join(p.text for p in document.paragraphs)
+
 
 def _pptx_to_text(doc_path: Path) -> str:
     prs = Presentation(str(doc_path))
@@ -50,8 +52,10 @@ def _pptx_to_text(doc_path: Path) -> str:
                     parts.append(para.text)
     return "\n".join(parts)
 
+
 def _txt_to_text(doc_path: Path) -> str:
     return doc_path.read_text(errors="replace")
+
 
 def convert_doc_to_text(doc_path: Path) -> str:
     match doc_path.suffix.lower():
@@ -65,6 +69,7 @@ def convert_doc_to_text(doc_path: Path) -> str:
             return _txt_to_text(doc_path)
         case suffix:
             raise ValueError(f"Unsupported file format: {suffix!r} ({doc_path.name})")
+
 
 def convert_docs_to_texts(doc_paths: list[Path]):
     texts = list()
@@ -82,6 +87,7 @@ def convert_docs_to_texts(doc_paths: list[Path]):
 
     return texts
 
+
 def _verify_image(path: Path) -> bool:
     try:
         with Image.open(path) as img:
@@ -90,7 +96,10 @@ def _verify_image(path: Path) -> bool:
     except Exception:
         return False
 
-def _convert_doc_to_images(doc_id: int, doc_path_str: str, images_dir_str: str, dpi: int) -> list[dict]:
+
+def _convert_doc_to_images(
+    doc_id: int, doc_path_str: str, images_dir_str: str, dpi: int
+) -> list[dict]:
     doc_path = Path(doc_path_str)
     images_dir = Path(images_dir_str)
 
@@ -112,23 +121,32 @@ def _convert_doc_to_images(doc_id: int, doc_path_str: str, images_dir_str: str, 
             try:
                 doc[page_num].get_pixmap(dpi=dpi).save(str(image_path))
             except Exception as e:
-                print(f"WARNING: failed to convert page {page_num + 1} of {doc_path.name}: {e}")
+                print(
+                    f"WARNING: failed to convert page {page_num + 1} of {doc_path.name}: {e}"
+                )
                 is_corrupt = True
 
             if not is_corrupt and not _verify_image(image_path):
-                print(f"WARNING: page {page_num + 1} of {doc_path.name} failed integrity check.")
+                print(
+                    f"WARNING: page {page_num + 1} of {doc_path.name} failed integrity check."
+                )
                 is_corrupt = True
 
-            pages.append({
-                "document_id": doc_id,
-                "image_path": str(image_path),
-                "number": page_num + 1,
-                "is_corrupt": is_corrupt,
-            })
+            pages.append(
+                {
+                    "document_id": doc_id,
+                    "image_path": str(image_path),
+                    "number": page_num + 1,
+                    "is_corrupt": is_corrupt,
+                }
+            )
 
     return pages
 
-def convert_docs_to_images(engine, data_dir: Path, dpi: int = 150, max_workers: int = None):
+
+def convert_docs_to_images(
+    engine, data_dir: Path, dpi: int = 150, max_workers: int = None
+):
     if max_workers is None:
         max_workers = min(os.cpu_count() or 4, 4)
     images_dir = data_dir / "images"
@@ -142,7 +160,9 @@ def convert_docs_to_images(engine, data_dir: Path, dpi: int = 150, max_workers: 
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
         future_to_doc = {
-            executor.submit(_convert_doc_to_images, doc.id, doc.path, str(images_dir), dpi): doc
+            executor.submit(
+                _convert_doc_to_images, doc.id, doc.path, str(images_dir), dpi
+            ): doc
             for doc in docs
         }
         for future in concurrent.futures.as_completed(future_to_doc):
@@ -159,36 +179,10 @@ def convert_docs_to_images(engine, data_dir: Path, dpi: int = 150, max_workers: 
             session.commit()
 
     corrupt_count = sum(1 for p in all_pages if p["is_corrupt"])
-    print(f"Done: {len(all_pages)} pages from {len(docs) - len(failed_docs)} documents. {corrupt_count} corrupt page(s).")
+    print(
+        f"Done: {len(all_pages)} pages from {len(docs) - len(failed_docs)} documents. {corrupt_count} corrupt page(s)."
+    )
     if failed_docs:
         print(f"Failed documents ({len(failed_docs)}): {failed_docs}")
 
     return len(all_pages), corrupt_count
-
-# gets image paths and corresponding document name and page number from images folder
-def get_images_metadata(images_dir: Path, metadata_path: Path):
-    # if metadata_path.is_file():
-    #     metadata = pd.read_csv(metadata_path)
-    #     return metadata
-    # else:
-    image_paths = list()
-    page_doc_paths = list()
-    page_nums = list()
-
-    for doc_path in images_dir.iterdir():
-        doc_name = doc_path.stem
-        if doc_path.is_dir():
-            for image_path in doc_path.iterdir():
-                image_paths.append(str(image_path))
-                page_doc_paths.append(doc_name)
-                page_nums.append(image_path.stem[-1])
-
-    metadata = pd.DataFrame(
-        {
-            "image_path": image_paths, 
-            "doc_name": page_doc_paths, 
-            "page_num": page_nums
-        }
-    )
-    metadata.to_csv(metadata_path, index=False)
-    return image_paths, page_doc_paths, page_nums

@@ -97,41 +97,21 @@ class EmbeddingSetup:
         embedder.embed_pages(page_ids, self.engine)
 
     @timefunction
-    def setup_col_embeddings(
-        self, model_name: str, index_name: str, page_granularity: bool = False
-    ):
-        models_dir = self.data_dir / "models"
+    def setup_col_embeddings(self, model_name: str, index_name: str):
         indexes_dir = self.data_dir / "indexes"
 
         device = get_device()
 
-        # col_embed_model = get_col_embedding_model(models_dir, model_name, device)
-        #
-        if page_granularity:
-            # index_path = indexes_dir / (index_name + "_pages")
-            # index = search.FastPlaid(
-            #     index=str(index_path), device="cuda", low_memory=False
-            # )
-            #
-            # with Session(self.engine) as session:
-            #     stmt = select(Page.id)
-            #     page_ids = list(session.scalars(stmt).all())
-            #
-            # col_embed_pages(self.engine, col_embed_model, index, page_ids)
-            pass
-        else:
-            index_path = indexes_dir / (index_name + "_docs")
-            index = search.FastPlaid(
-                index=str(index_path), device="cuda", low_memory=False
-            )
+        index_path = indexes_dir / (index_name + "_docs")
+        index = search.FastPlaid(index=str(index_path), device="cuda", low_memory=False)
 
-            col_embed_model = ColDocEmbedder.get_col_embedding_model(
-                model_name, device, self.data_dir
-            )
+        col_embed_model = ColDocEmbedder.get_col_embedding_model(
+            model_name, device, self.data_dir
+        )
 
-            with Session(self.engine) as session:
-                stmt = select(Document.id)
-                doc_ids = list(session.scalars(stmt).all())
+        with Session(self.engine) as session:
+            stmt = select(Document.id)
+            doc_ids = list(session.scalars(stmt).all())
 
-            embedder = ColDocEmbedder(col_embed_model)
-            embedder.embed_docs(doc_ids, self.engine, index)
+        embedder = ColDocEmbedder(col_embed_model)
+        embedder.embed_docs(doc_ids, self.engine, index)
