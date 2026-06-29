@@ -4,17 +4,17 @@ from pathlib import Path
 from sqlalchemy.engine import URL
 from sqlalchemy.engine import create_engine
 from sqlalchemy.orm import Session
-from sqlalchemy import delete, select
+from sqlalchemy import select
 import torch
 from fast_plaid import search, filtering
 
 from .models import Document, Page
-from .setup import DatabaseSetup, EmbeddingSetup
+from .setup import DatabaseSetup
 from .utils import get_device
 from .utils import timefunction
-from .embed import BiEncoderPageEmbedder, ColDocEmbedder
-from .ranking import BiEncoderPageRanker, delete_docs, delete_pages
-from .ranking import TfIdfDocRanker, BM25DocRanker, ColDocRanker
+from .embed import ColPageEmbedder, NemotronColPageEmbedder
+from .ranking import BiEncoderPageRanker, ColPageRanker, delete_docs, delete_pages
+from .ranking import TfIdfDocRanker, BM25DocRanker
 
 load_dotenv()
 
@@ -128,7 +128,22 @@ def test_bi_encoder(engine, queries, data_dir):
         stmt = select(Page.id).join(Page.document)
         page_ids = list(session.scalars(stmt).all())
 
-    ranker = BiEncoderPageRanker(engine, model_name, "test_bi_encoder", data_dir)
+    ranker = BiEncoderPageRanker(engine, model_name, data_dir)
+    ranker.fit(page_ids)
+    rankings = ranker.rank(queries)
+
+    for ranking in rankings:
+        print(ranking)
+
+
+def test_qwen_bi_encoder(engine, queries, data_dir):
+    model_name = "Qwen/Qwen3-VL-Embedding-2B"
+
+    with Session(engine) as session:
+        stmt = select(Page.id).join(Page.document)
+        page_ids = list(session.scalars(stmt).all())
+
+    ranker = BiEncoderPageRanker(engine, model_name, data_dir)
     ranker.fit(page_ids)
     rankings = ranker.rank(queries)
 
@@ -140,25 +155,25 @@ def test_col(engine, queries: list[str], data_dir: Path = Path("../test")):
     model_name = "nvidia/llama-nemotron-colembed-vl-3b-v2"
 
     device = get_device()
-    col_embed_model = ColDocEmbedder.get_col_embedding_model(model_name, device)
+    embedder = NemotronColPageEmbedder(model_name, device, data_dir)
 
     indexes_dir = data_dir / "indexes"
     index = search.FastPlaid(
-        index=str(indexes_dir / "llama-nemotron-colembed-vl-3b-v2_index"),
-        device="cuda",
+        index=str(indexes_dir / (model_name + "_index")),
+        device=device,
         low_memory=False,
     )
 
     with Session(engine) as session:
-        stmt = select(Document.id)
-        doc_ids = list(session.scalars(stmt).all())
+        stmt = select(Page.id)
+        page_ids = list(session.scalars(stmt).all())
 
-    ranker = ColDocRanker(col_embed_model, index, engine)
-    ranker.fit(doc_ids)
-    rankings = ranker.rank(queries)
-
-    for ranking in rankings:
-        print(ranking)
+    ranker = ColPageRanker(embedder, index, engine)
+    ranker.fit(page_ids)
+    # rankings = ranker.rank(queries)
+    #
+    # for ranking in rankings:
+    #     print(ranking)
 
 
 def test_setup(conn_url, data_dir: Path = Path("../test")):
@@ -190,7 +205,7 @@ def main():
     print(f"database: {DB_DATABASE}")
     engine = create_engine(conn_url)
 
-    test_setup(conn_url)
+    # test_setup(conn_url)
     # test_delete_doc(engine, data_dir, 2)
     # test_delete_page(engine, data_dir, 3)
 
@@ -198,8 +213,8 @@ def main():
 
     # test_tf_idf(engine, queries)
     # test_bm25(engine, queries)
-    test_bi_encoder(engine, queries, data_dir)
-    # test_col(engine, queries, data_dir)
+    # test_bi_encoder(engine, queries, data_dir)
+    test_col(engine, queries, data_dir)
 
 
 if __name__ == "__main__":

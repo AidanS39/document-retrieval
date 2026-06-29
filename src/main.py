@@ -1,15 +1,22 @@
 import os
+from dotenv import load_dotenv
 from pathlib import Path
 from sqlalchemy import create_engine, select
 from sqlalchemy.engine import URL
 from sqlalchemy.orm import Session
 from document_retrieval.models import Document
 from document_retrieval.utils import db_initialized, db_seeded
-from document_retrieval.setup import DatabaseSetup
+from document_retrieval.setup import DatabaseSetup, EmbeddingSetup
+from document_retrieval.embed import _last_token_pool_embed
+from document_retrieval.utils import get_device
+
+load_dotenv()
 
 
 def main():
-    data_dir = Path("../data")
+    data_dir = Path(os.getenv("DATA_DIR"))
+
+    device = get_device()
 
     DB_DRIVER = os.getenv("DB_DRIVER", "postgresql")
     DB_USER = os.getenv("POSTGRES_USER")
@@ -50,12 +57,13 @@ def main():
 
     engine = create_engine(conn_url)
 
-    with Session(engine) as session:
-        stmt = select(Document.id, Document.name).where(Document.id.in_([1, 2, 3]))
-        docs = session.execute(stmt).all()
-    print(docs)
+    model_name = "Qwen/Qwen3-VL-Embedding-2B"
+    col_model_name = "nvidia/llama-nemotron-colembed-vl-3b-v2"
 
-    print("hello from main!")
+    embed_setup = EmbeddingSetup(engine, data_dir)
+
+    # embed_setup.setup_page_embeddings(model_name, _last_token_pool_embed, device)
+    embed_setup.setup_col_embeddings(col_model_name, device)
 
 
 if __name__ == "__main__":

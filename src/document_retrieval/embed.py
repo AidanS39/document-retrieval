@@ -1,5 +1,7 @@
+import math
 from pathlib import Path
 import torch
+import torch.nn.functional as F
 from sqlalchemy.orm import Session
 from sqlalchemy import select, update
 from sqlalchemy.engine import Engine
@@ -7,28 +9,39 @@ from .models import Document, Page
 from sklearn.feature_extraction.text import TfidfVectorizer
 from scipy.sparse import csr_matrix
 import bm25s
-from sentence_transformers import SentenceTransformer
 from transformers import AutoModel, AutoProcessor, PreTrainedModel, ProcessorMixin
 from transformers.image_utils import load_image
-from fast_plaid import filtering
 from .utils import timefunction
 import time
-from abc import ABC, abstractmethod
 
 
-# NOTE: potential inheritance can be used to enforce future Embedder behavior
-class Embedder(ABC):
-    def __init__(self):
-        pass
-
-    @abstractmethod
-    def embed_docs(self, docs: list[Document]):
-        pass
+def _cls_pool_embed(model: PreTrainedModel, inputs) -> torch.Tensor:
+    outputs = model(**inputs)
+    embeddings = outputs.last_hidden_state[:, 0, :]
+    return F.normalize(embeddings, p=2, dim=-1)
 
 
-class TextEmbedder(Embedder, ABC):
-    def __init__(self):
-        pass
+def _last_token_pool_embed(model: PreTrainedModel, inputs) -> torch.Tensor:
+    outputs = model(**inputs)
+    hidden = outputs.last_hidden_state
+    attention_mask = inputs["attention_mask"]
+    last_positions = attention_mask.flip(dims=[1]).argmax(dim=1)
+    col = attention_mask.shape[1] - last_positions - 1
+    row = torch.arange(hidden.shape[0], device=hidden.device)
+    embeddings = hidden[row, col]
+    return F.normalize(embeddings, p=2, dim=-1)
+
+
+def _mean_pool_embed(model: PreTrainedModel, inputs: dict) -> torch.Tensor:
+    outputs = model(**inputs)
+    hidden = outputs.last_hidden_state
+    mask = inputs.get(
+        "attention_mask", torch.ones(hidden.shape[:2], device=hidden.device)
+    )
+    embeddings = (hidden * mask.unsqueeze(-1)).sum(1) / mask.sum(
+        -1, keepdim=True
+    ).clamp(min=1e-9)
+    return F.normalize(embeddings, p=2, dim=-1)
 
 
 class TfIdfDocEmbedder:
@@ -62,381 +75,452 @@ class BM25DocEmbedder:
         self.index.index(tokenized_texts)
 
 
-class BiEncoderPageEmbedder:
-    def __init__(
-        self,
-        model_name: str,
-        name: str,
-        device: torch.device,
-        data_dir: Path = Path("../data"),
-    ):
+class TransformersBasedEmbedder:
+    def __init__(self, model_name: str, device: torch.device, data_dir: Path):
         self.model, self.processor = self.get_model_and_processor(
             model_name, device, data_dir
         )
-        self.name = name
+        self.model_name = model_name
+        self.device = device
         self.data_dir = data_dir
 
-    def _embed_batch(self, image_paths: list[str]):
-        images = [load_image(image) for image in image_paths]
+    @staticmethod
+    def get_model_and_processor(model_name: str, device: torch.device, data_dir: Path):
+        models_dir = data_dir / "models"
+        model_dir = models_dir / model_name
 
-        inputs = self.processor(images=images, return_tensors="pt")
+        if model_dir.exists():
+            print(f"{model_name} found locally. loading from {model_dir}...")
+            model = AutoModel.from_pretrained(
+                pretrained_model_name_or_path=str(model_dir),
+                device_map=device,
+                trust_remote_code=True,
+                dtype=torch.bfloat16,
+                attn_implementation="sdpa",
+            ).eval()
+            processor = AutoProcessor.from_pretrained(
+                pretrained_model_name_or_path=str(model_dir),
+                device_map=device,
+                trust_remote_code=True,
+            )
+        else:
+            print(f"{model_name} not found locally. loading from remote...")
+            model = AutoModel.from_pretrained(
+                pretrained_model_name_or_path=model_name,
+                device_map=device,
+                trust_remote_code=True,
+                dtype=torch.bfloat16,
+                attn_implementation="sdpa",
+            ).eval()
+            processor = AutoProcessor.from_pretrained(
+                pretrained_model_name_or_path=model_name,
+                device_map=device,
+                trust_remote_code=True,
+            )
 
-        embeddings = self.model.get_image_features(**inputs)
+            print(f"saving {model_name} to {model_dir}")
+            model.save_pretrained(str(model_dir))
+            processor.save_pretrained(str(model_dir))
+
+        return model, processor
+
+
+class BiEncoderPageEmbedder(TransformersBasedEmbedder):
+    def __init__(
+        self,
+        model_name: str,
+        device: torch.device,
+        data_dir: Path,
+        embed_func,
+    ):
+        super().__init__(model_name, device, data_dir)
+        self.embed_func = embed_func or _mean_pool_embed
+
+    def _preprocess_batch(self, page_ids: list[str], engine: Engine):
+        with Session(engine) as session:
+            stmt = select(Page.id, Page.image_path, Page.image_failed).where(
+                Page.id.in_(page_ids),
+            )
+            pages = session.execute(stmt).all()
+
+        successful_page_ids = list()
+        failed_page_ids = list()
+        images = list()
+
+        for page_id, image_path, image_failed in pages:
+            if image_failed:
+                failed_page_ids.append(page_id)
+                print(
+                    f"WARNING: page image could not be loaded for {image_path}: image marked as failed"
+                )
+            else:
+                try:
+                    images.append(load_image(image_path))
+                    successful_page_ids.append(page_id)
+                except Exception as exception:
+                    failed_page_ids.append(page_id)
+                    print(
+                        f"WARNING: page image could not be loaded for {image_path}: {exception}"
+                    )
+        return images, successful_page_ids, failed_page_ids
+
+    def _process_batch(self, page_images: list):
+        messages = [
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "image": image,
+                        }
+                    ],
+                }
+            ]
+            for image in page_images
+        ]
+
+        texts = self.processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+
+        inputs = self.processor(
+            text=texts, images=page_images, padding=True, return_tensors="pt"
+        ).to(self.device)
+
+        return inputs
+
+    @timefunction
+    def _embed_batch(self, inputs):
+
+        with torch.no_grad():
+            embeddings = self.embed_func(self.model, inputs)
 
         return embeddings
 
     @timefunction
-    def embed_pages(self, page_ids: list[int], engine: Engine, batch_size: int = 64):
-        with Session(engine) as session:
-            stmt = select(Page.id, Page.image_path).where(
-                Page.id.in_(page_ids),
-                Page.embedding.is_(None),
-                Page.is_corrupt.is_not(True),
-            )
-            pages = session.execute(stmt).all()
-
-        if not pages:
-            print("All pages already have embeddings.")
-            return
-
+    def embed_pages(self, page_ids: list[int], engine: Engine, batch_size: int = 128):
         i = 0
-        while i < len(pages):
-            batch_pages = pages[i : i + batch_size]
-            batch_image_paths = [page.image_path for page in batch_pages]
+        while i < len(page_ids):
+            batch_page_ids = page_ids[i : i + batch_size]
 
-            batch_embeddings = self._embed_batch(batch_image_paths)
+            images, successful_ids, failed_ids = self._preprocess_batch(
+                batch_page_ids, engine
+            )
 
-            with Session(engine) as session:
+            if len(successful_ids) <= 0:
+                print(
+                    f"WARNING: no page images could be loaded for page batch {page_ids}. skipping embedding generation for batch."
+                )
+                embeddings = list()
+            else:
+                peak_allocated = torch.cuda.max_memory_allocated()
+                print(
+                    f"(BEFORE) peak VRAM allocation: {peak_allocated / 1024**3:.2f} GB",
+                    flush=True,
+                )
+
+                inputs = self._process_batch(images)
+
+                peak_allocated = torch.cuda.max_memory_allocated()
+                print(
+                    f"(PROCESSED) peak VRAM allocation: {peak_allocated / 1024**3:.2f} GB",
+                    flush=True,
+                )
+
+                embeddings = self._embed_batch(inputs).to("cpu").tolist()
+
+                peak_allocated = torch.cuda.max_memory_allocated()
+                print(
+                    f"(EMBEDDED) peak VRAM allocation: {peak_allocated / 1024**3:.2f} GB",
+                    flush=True,
+                )
+
                 updated_pages = [
-                    {"id": page.id, "embedding": embedding.cpu().tolist()}
-                    for page, embedding in zip(batch_pages, batch_embeddings)
+                    {"id": id, "embedding": embedding}
+                    for id, embedding in zip(successful_ids, embeddings)
                 ]
-                session.execute(update(Page), updated_pages)
-            session.commit()
 
+                with Session(engine) as session:
+                    session.execute(update(Page), updated_pages)
+                    session.commit()
+
+            if len(failed_ids) > 0:
+                failed_pages = [
+                    {"id": id, "embeddings_failed": True} for id in failed_ids
+                ]
+
+                with Session(engine) as session:
+                    session.execute(update(Page), failed_pages)
+                    session.commit()
+
+            print(
+                f"{max([i + batch_size, len(page_ids)])}/{len(page_ids)} pages embedded."
+            )
             i += batch_size
 
     @timefunction
     def embed_queries(self, queries: list[str]):
-        inputs = self.processor(text=queries, return_tensors="pt")
-
-        embeddings = self.model(inputs)
-
-        return embeddings
-
-    @staticmethod
-    def get_model_and_processor(
-        model_name: str, device: torch.device, data_dir: Path = Path("../data")
-    ):
-        models_dir = data_dir / "models"
-        model_dir = models_dir / model_name
-        if model_dir.exists():
-            print(f"{model_name} found locally. loading from {model_dir}...")
-            model = AutoModel.from_pretrained(
-                pretrained_model_name_or_path=model_dir,
-                device_map=device,
-                dtype=torch.bfloat16,
-                attn_implementation="sdpa",
-            ).eval()
-            processor = AutoProcessor.from_pretrained(
-                pretrained_model_name_or_path=str(model_dir)
-            )
-        else:
-            print(f"{model_name} not found locally. loading from remote...")
-            model = AutoModel.from_pretrained(
-                pretrained_model_name_or_path=model_name,
-                device_map=device,
-                trust_remote_code=True,
-                dtype=torch.bfloat16,
-                attn_implementation="sdpa",
-            ).eval()
-            processor = AutoProcessor.from_pretrained(
-                pretrained_model_name_or_path=model_name, trust_remote_code=True
-            )
-
-            print(f"saving {model_name} to {model_dir}")
-            model.save_pretrained(str(model_dir))
-            processor.save_pretrained(str(model_dir))
-
-        return model, processor
-
-
-class ColEmbedder(ABC):
-    def __init__(self):
-        pass  # TODO:
-
-    @staticmethod
-    def get_model_and_processor(
-        model_name: str, device: torch.device, data_dir: Path = Path("../data")
-    ):
-        models_dir = data_dir / "models"
-        model_dir = models_dir / model_name
-        if model_dir.exists():
-            print(f"{model_name} found locally. loading from {model_dir}...")
-            model = AutoModel.from_pretrained(
-                pretrained_model_name_or_path=model_dir,
-                device_map=device,
-                trust_remote_code=True,
-                dtype=torch.bfloat16,
-                attn_implementation="sdpa",
-            ).eval()
-            processor = AutoProcessor.from_pretrained(
-                pretrained_model_name_or_path=str(model_dir), trust_remote_code=True
-            )
-        else:
-            print(f"{model_name} not found locally. loading from remote...")
-            model = AutoModel.from_pretrained(
-                pretrained_model_name_or_path=model_name,
-                device_map=device,
-                trust_remote_code=True,
-                dtype=torch.bfloat16,
-                attn_implementation="sdpa",
-            ).eval()
-            processor = AutoProcessor.from_pretrained(
-                pretrained_model_name_or_path=model_name, trust_remote_code=True
-            )
-
-            print(f"saving {model_name} to {model_dir}")
-            model.save_pretrained(str(model_dir))
-            processor.save_pretrained(str(model_dir))
-
-        return model, processor
-
-
-class ColDocEmbedder(ColEmbedder):
-    def __init__(self, model, data_dir: Path = Path("../data")):
-        self.model = model
-        self.data_dir = data_dir
-
-    def _embed_batch(self, batch_ids: list[int], engine: Engine):
-        with Session(engine) as session:
-            stmt = (
-                select(Page.document_id, Page.image_path)
-                .where(Page.document_id.in_(batch_ids))
-                .order_by(Page.document_id, Page.id)
-            )
-            pages = session.execute(stmt).all()
-
-        doc_image_paths = {}
-        for doc_id, image_path in pages:
-            doc_image_paths.setdefault(doc_id, []).append(image_path)
-
-        all_images = []
-        page_counts = []
-        successful_doc_ids = []
-
-        for doc_id in batch_ids:
-            paths = doc_image_paths.get(doc_id, [])
-            images = []
-            for path in paths:
-                try:
-                    images.append(load_image(path))
-                except Exception as exception:
-                    print(
-                        f"WARNING: page image at {path} for doc {doc_id} could not be loaded. {exception}"
-                    )
-            if len(images) <= 0:
-                print(f"WARNING: no page images could be loaded for doc {doc_id}.")
-            else:
-                all_images.extend(images)
-                page_counts.append(len(paths))
-                successful_doc_ids.append(doc_id)
-
-        if len(all_images) <= 0:
-            print(
-                f"WARNING: no page images could be loaded for doc batch {batch_ids}. skipping embedding generation for batch."
-            )
-            return [], []
-        all_inputs = self.processor(all_images, return_tensors="pt")
-        all_embeddings = self.model.get_image_features(**all_inputs)
-        print(f"image embeddings shape: {all_embeddings.shape}")
-        all_images.clear()
-
-        doc_embeddings = []
-        offset = 0
-        for count in page_counts:
-            doc_embeddings.append(
-                torch.flatten(all_embeddings[offset : offset + count], 0, 1)
-            )
-            offset += count
-
-        return doc_embeddings, successful_doc_ids
-
-    def embed_docs(
-        self, doc_ids: list[int], engine: Engine, index, batch_size: int = 8
-    ):
-        batch_ids = []
-
-        # filter out already embedded and indexed docs
-        indexes_dir = self.data_dir / "indexes"
-        index_path = indexes_dir / index.index
-
-        if index_path.exists():
-            placeholders = ", ".join(["?"] * len(doc_ids))
-            existing_embeddings = filtering.get(
-                index=index.index,
-                condition=f"doc_id IN ({placeholders})",
-                parameters=doc_ids,
-            )
-            existing_doc_ids = [
-                embedding["doc_id"] for embedding in existing_embeddings
+        instruction = "Retrieve images or text relevant to the user's query."
+        messages = [
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Instruct: {instruction}\nQuery: {query}",
+                        }
+                    ],
+                }
             ]
-            doc_ids = [doc_id for doc_id in doc_ids if doc_id not in existing_doc_ids]
+            for query in queries
+        ]
 
-        print(f"0/{len(doc_ids)} documents processed.")
-        start_time = time.time()
-        for i, doc_id in enumerate(doc_ids):
-            batch_ids.append(doc_id)
+        texts = self.processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
 
-            if len(batch_ids) >= batch_size:
-                doc_embeddings, successful_batch_ids = self._embed_batch(
-                    batch_ids, engine
-                )
-                if len(successful_batch_ids) > 0:
-                    start_time = time.time()
-                    index.update(
-                        documents_embeddings=doc_embeddings,
-                        metadata=[{"doc_id": id} for id in successful_batch_ids],
-                        start_from_scratch=0,
-                    )
+        inputs = self.processor(text=texts, padding=True, return_tensors="pt").to(
+            self.device
+        )
 
-                    del doc_embeddings
-                    torch.cuda.empty_cache()
-
-                    end_time = time.time()
-                    print(f"indexing documents took {end_time - start_time} seconds.")
-
-                    peak_allocated = torch.cuda.max_memory_allocated()
-                    print(f"peak VRAM allocation: {peak_allocated / 1024**3:.2f} GB")
-
-                    batch_ids.clear()
-                print(
-                    f"{i}/{len(doc_ids)} documents processed. {time.time() - start_time} seconds elapsed."
-                )
-
-        if len(batch_ids) > 0:
-            doc_embeddings, successful_batch_ids = self._embed_batch(batch_ids, engine)
-
-            if len(successful_batch_ids) > 0:
-                start_time = time.time()
-                index.update(
-                    documents_embeddings=doc_embeddings,
-                    metadata=[{"doc_id": id} for id in successful_batch_ids],
-                    start_from_scratch=0,
-                )
-
-                del doc_embeddings
-                torch.cuda.empty_cache()
-
-                end_time = time.time()
-                print(f"indexing documents took {end_time - start_time} seconds.")
-
-                peak_allocated = torch.cuda.max_memory_allocated()
-                print(f"peak VRAM allocation: {peak_allocated / 1024**3:.2f} GB")
-
-                batch_ids.clear()
-
-    def embed_queries(self, queries: list[str]):
-        inputs = self.processor(text=queries, return_tensors="pt")
-
-        embeddings = self.model(inputs)
+        with torch.no_grad():
+            embeddings = self.embed_func(self.model, inputs).to("cpu").tolist()
         return embeddings
 
 
-class ColPageEmbedder(ColEmbedder):
+class QwenBiEncoderPageEmbedder(BiEncoderPageEmbedder):
+    def __init__(
+        self,
+        model_name: str,
+        device: torch.device,
+        data_dir: Path = Path("../data"),
+    ):
+        super().__init__(model_name, device, data_dir)
+
+
+class ColPageEmbedder(TransformersBasedEmbedder):
     def __init__(
         self, model_name, device: torch.device, data_dir: Path = Path("../data")
     ):
-        self.model = self.processor = self.get_model_and_processor(
-            model_name, device, data_dir
-        )
-        self.data_dir = data_dir
+        super().__init__(model_name, device, data_dir)
 
-    def _embed_batch(self, batch_ids: list[int], engine):
+    def _preprocess_batch(self, page_ids: list[str], engine: Engine):
         with Session(engine) as session:
-            stmt = select(Page.id, Page.image_path).where(Page.id.in_(batch_ids))
+            stmt = select(Page.id, Page.image_path, Page.image_failed).where(
+                Page.id.in_(page_ids),
+            )
             pages = session.execute(stmt).all()
 
-        # load image of each page, filter out failed image loads
-        batch_images = []
-        successful_page_ids = []
-        for page_id, image_path in pages:
-            try:
-                batch_images.append(load_image(image_path))
-                successful_page_ids.append(page_id)
-            except Exception as exception:
+        successful_page_ids = list()
+        failed_page_ids = list()
+        images = list()
+
+        for page_id, image_path, image_failed in pages:
+            if image_failed:
+                failed_page_ids.append(page_id)
                 print(
-                    f"WARNING: page image could not be loaded for {image_path}: {exception}"
+                    f"WARNING: page image could not be loaded for {image_path}: image marked as failed"
                 )
+            else:
+                try:
+                    images.append(load_image(image_path))
+                    successful_page_ids.append(page_id)
+                except Exception as exception:
+                    failed_page_ids.append(page_id)
+                    print(
+                        f"WARNING: page image could not be loaded for {image_path}: {exception}"
+                    )
+        return images, successful_page_ids, failed_page_ids
 
-        if len(batch_images) <= 0:
-            print(
-                f"WARNING: no page images could be loaded for page batch {batch_ids}. skipping embedding generation for batch."
-            )
-            return []
+    def _process_batch(self, page_images: list):
+        messages = [
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "image": image,
+                        }
+                    ],
+                }
+            ]
+            for image in page_images
+        ]
 
-        inputs = self.processor(batch_images, return_tensors="pt")
-        page_embeddings = self.model.get_image_features(**inputs)
-        print(f"image embeddings shape: {page_embeddings.shape}")
+        texts = self.processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
 
-        batch_images.clear()
+        inputs = self.processor(
+            text=texts, images=page_images, padding=True, return_tensors="pt"
+        ).to(self.device)
 
-        # separates page embeddings tensor along first (page) dimension into individual page tensors
-        page_embeddings = list(torch.unbind(page_embeddings, dim=0))
+        return inputs
 
-        return page_embeddings, successful_page_ids
+    @timefunction
+    def _embed_batch(self, inputs):
 
-    def embed_pages(
-        self, page_ids: list[int], engine: Engine, index, batch_size: int = 64
-    ):
+        with torch.no_grad():
+            embeddings = self.embed_func(self.model, inputs)
+
+        return embeddings
+
+    def embed_pages(self, page_ids: list[int], engine: Engine, batch_size: int = 64):
+        embeddings_dir = self.data_dir / "embeddings" / self.model_name
         batch_ids = list()
 
-        for page_id in page_ids:
-            batch_ids.append(page_id)
+        metadata_path = embeddings_dir / "metadata.pt"
+        if metadata_path.is_file():
+            metadata = torch.load(metadata_path)
+        else:
+            metadata = {"page_ids": list(), "num_chunks": 0}
 
-            if len(batch_ids) >= batch_size:
-                page_embeddings, successful_batch_ids = self._embed_batch(
-                    batch_ids, engine
+        i = 0
+        while i < len(page_ids):
+            batch_ids = page_ids[i : i + batch_size]
+            images, successful_page_ids, failed_page_ids = self._preprocess_batch(
+                batch_ids, engine
+            )
+
+            if len(successful_page_ids) <= 0:
+                print(
+                    f"WARNING: no page images could be loaded for page batch {page_ids}. skipping embedding generation for batch."
+                )
+                page_embeddings = list()
+            else:
+                peak_allocated = torch.cuda.max_memory_allocated()
+                print(
+                    f"(BEFORE) peak VRAM allocation: {peak_allocated / 1024**3:.2f} GB",
+                    flush=True,
+                )
+                inputs = self._process_batch(images)
+
+                peak_allocated = torch.cuda.max_memory_allocated()
+                print(
+                    f"(PROCESSED) peak VRAM allocation: {peak_allocated / 1024**3:.2f} GB",
+                    flush=True,
                 )
 
-                if len(successful_batch_ids) > 0:
-                    start_time = time.time()
-                    index.update(
-                        documents_embeddings=page_embeddings,
-                        metadata=[{"page_id": id} for id in successful_batch_ids],
-                        start_from_scratch=0,
-                    )
+                page_embeddings = self._embed_batch(inputs)
 
-                    del page_embeddings
-                    torch.cuda.empty_cache()
-
-                    end_time = time.time()
-                    print(f"indexing pages took {end_time - start_time} seconds.")
-
-                    peak_allocated = torch.cuda.max_memory_allocated()
-                    print(f"peak VRAM allocation: {peak_allocated / 1024**3:.2f} GB")
-
-                    batch_ids.clear()
-
-        # process remaining pages
-        if len(batch_ids) > 0:
-            page_embeddings, successful_batch_ids = self._embed_batch(batch_ids, engine)
-
-            if len(successful_batch_ids) > 0:
-                start_time = time.time()
-                index.update(
-                    documents_embeddings=page_embeddings,
-                    metadata=[{"page_id": id} for id in successful_batch_ids],
-                    start_from_scratch=0,
+                peak_allocated = torch.cuda.max_memory_allocated()
+                print(
+                    f"(EMBEDDED) peak VRAM allocation: {peak_allocated / 1024**3:.2f} GB",
+                    flush=True,
                 )
-
-                del page_embeddings
-                torch.cuda.empty_cache()
-
-                end_time = time.time()
-                print(f"indexing pages took {end_time - start_time} seconds.")
 
                 peak_allocated = torch.cuda.max_memory_allocated()
                 print(f"peak VRAM allocation: {peak_allocated / 1024**3:.2f} GB")
 
-                batch_ids.clear()
+                embeddings_chunk = {
+                    "embeddings": page_embeddings,
+                    "pages": successful_page_ids,
+                }
+
+                embeddings_chunk_path = embeddings_dir / f"_{metadata['num_chunks']}"
+                torch.save(embeddings_chunk, embeddings_chunk_path)
+
+                metadata["num_chunks"] += 1
+                metadata["page_ids"].extend(successful_page_ids)
+
+                torch.save(metadata, metadata_path)
+
+                i += batch_size
+
+            if len(failed_page_ids) > 0:
+                failed_pages = [
+                    {"id": id, "col_embeddings_failed": True} for id in failed_page_ids
+                ]
+
+                with Session(engine) as session:
+                    session.execute(update(Page), failed_pages)
+                    session.commit()
+
+
+class NemotronColPageEmbedder(ColPageEmbedder):
+    @timefunction
+    def _embed_batch(self, images: list):
+        embeddings = self.model.forward_images(images, batch_size=64)
+        return embeddings
+
+    @timefunction
+    def embed_pages(self, page_ids: list[int], engine: Engine, batch_size: int = 64):
+        embeddings_dir = self.data_dir / "embeddings" / self.model_name
+        batch_ids = list()
+
+        metadata_path = embeddings_dir / "metadata.pt"
+        if metadata_path.is_file():
+            metadata = torch.load(metadata_path)
+        else:
+            embeddings_dir.mkdir(parents=True, exist_ok=True)
+            metadata = {"page_ids": list(), "num_chunks": 0}
+
+        # remove page ids that have already been embedded
+        embedded_page_ids = set(metadata["page_ids"])
+        page_ids = [id for id in page_ids if id not in embedded_page_ids]
+
+        i = 0
+        while i < len(page_ids):
+            batch_ids = page_ids[i : i + batch_size]
+            images, successful_page_ids, failed_page_ids = self._preprocess_batch(
+                batch_ids, engine
+            )
+
+            if len(successful_page_ids) <= 0:
+                print(
+                    f"WARNING: no page images could be loaded for page batch {page_ids}. skipping embedding generation for batch."
+                )
+                page_embeddings = list()
+            else:
+                peak_allocated = torch.cuda.max_memory_allocated()
+                print(
+                    f"(BEFORE) peak VRAM allocation: {peak_allocated / 1024**3:.2f} GB",
+                    flush=True,
+                )
+                page_embeddings = self._embed_batch(images)
+                print(page_embeddings.shape)
+
+                peak_allocated = torch.cuda.max_memory_allocated()
+                print(
+                    f"(EMBEDDED) peak VRAM allocation: {peak_allocated / 1024**3:.2f} GB",
+                    flush=True,
+                )
+                print(f"image embeddings shape: {page_embeddings.shape}")
+
+                embeddings_chunk = {
+                    "embeddings": page_embeddings,
+                    "pages": successful_page_ids,
+                }
+                embeddings_chunk_path = (
+                    embeddings_dir / f"chunk_{metadata['num_chunks']}.pt"
+                )
+
+                print(
+                    f"saving embeddings chunk at {embeddings_chunk_path}... DO NOT EXIT"
+                )
+
+                torch.save(embeddings_chunk, embeddings_chunk_path)
+                metadata["num_chunks"] += 1
+                metadata["page_ids"].extend(successful_page_ids)
+                torch.save(metadata, metadata_path)
+
+                print(f"saved embeddings chunk at {embeddings_chunk_path}.")
+
+                i += batch_size
+
+            if len(failed_page_ids) > 0:
+                failed_pages = [
+                    {"id": id, "col_embeddings_failed": True} for id in failed_page_ids
+                ]
+
+                with Session(engine) as session:
+                    session.execute(update(Page), failed_pages)
+                    session.commit()
+
+    @timefunction
+    def embed_queries(self, queries: list[str]):
+        embeddings = self.model.forward_queries(queries, batch_size=8)
+        return embeddings

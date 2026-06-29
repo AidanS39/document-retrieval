@@ -6,6 +6,7 @@ from sqlalchemy import text
 from sqlalchemy import select, insert
 from sqlalchemy.orm import Session
 from fast_plaid import search
+import torch
 
 from .preprocessing import find_docs
 from .preprocessing import convert_docs_to_texts
@@ -14,7 +15,7 @@ from .utils import sanitize_strings, sanitize_string
 from .utils import get_device, timefunction
 from .utils import mark_db_as_initialized, mark_db_as_seeded
 from .models import Base, Document, Page
-from .embed import BiEncoderPageEmbedder, ColDocEmbedder
+from .embed import BiEncoderPageEmbedder, NemotronColPageEmbedder
 
 
 class DatabaseSetup:
@@ -62,20 +63,32 @@ class DatabaseSetup:
         docs_dir = self.data_dir / "documents"
 
         doc_paths = find_docs(docs_dir)
-        texts = convert_docs_to_texts(doc_paths)
+        texts, successful_doc_paths, failed_doc_paths = convert_docs_to_texts(doc_paths)
         texts = sanitize_strings(texts)
 
-        docs = [
+        successful_docs = [
             {
-                "name": sanitize_string(doc_paths[i].stem),
-                "path": sanitize_string(str(doc_paths[i])),
+                "name": sanitize_string(successful_doc_paths[i].stem),
+                "path": sanitize_string(str(successful_doc_paths[i])),
                 "text": texts[i],
             }
-            for i in range(len(doc_paths))
+            for i in range(len(successful_doc_paths))
+        ]
+
+        failed_docs = [
+            {
+                "name": sanitize_string(failed_doc_paths[i].stem),
+                "path": sanitize_string(str(failed_doc_paths[i])),
+                "text_failed": True,
+            }
+            for i in range(len(failed_doc_paths))
         ]
 
         with Session(self.engine) as session:
-            session.execute(insert(Document), docs)
+            if len(successful_docs) > 0:
+                session.execute(insert(Document), successful_docs)
+            if len(failed_docs) > 0:
+                session.execute(insert(Document), failed_docs)
             session.commit()
 
         convert_docs_to_images(self.engine, self.data_dir)
@@ -89,29 +102,22 @@ class EmbeddingSetup:
         self.data_dir = data_dir
 
     @timefunction
-    def setup_page_embeddings(self, embedder: BiEncoderPageEmbedder):
+    def setup_page_embeddings(self, model_name: str, embed_func, device: torch.device):
         with Session(self.engine) as session:
             stmt = select(Page.id)
             page_ids = list(session.scalars(stmt).all())
 
+        embedder = BiEncoderPageEmbedder(model_name, device, self.data_dir, embed_func)
+
         embedder.embed_pages(page_ids, self.engine)
 
     @timefunction
-    def setup_col_embeddings(self, model_name: str, index_name: str):
-        indexes_dir = self.data_dir / "indexes"
-
+    def setup_col_embeddings(self, model_name: str, device: torch.device):
         device = get_device()
 
-        index_path = indexes_dir / (index_name + "_docs")
-        index = search.FastPlaid(index=str(index_path), device="cuda", low_memory=False)
-
-        col_embed_model = ColDocEmbedder.get_col_embedding_model(
-            model_name, device, self.data_dir
-        )
-
         with Session(self.engine) as session:
-            stmt = select(Document.id)
-            doc_ids = list(session.scalars(stmt).all())
+            stmt = select(Page.id)
+            page_ids = list(session.scalars(stmt).all())
 
-        embedder = ColDocEmbedder(col_embed_model)
-        embedder.embed_docs(doc_ids, self.engine, index)
+        embedder = NemotronColPageEmbedder(model_name, device, self.data_dir)
+        embedder.embed_pages(page_ids, self.engine)

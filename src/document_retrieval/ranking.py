@@ -1,24 +1,24 @@
+import math
+import torch
 from abc import ABC, abstractmethod
-import pandas as pd
 import bm25s
 from sklearn.metrics.pairwise import cosine_similarity
 from scipy.sparse import csr_matrix
 from sqlalchemy import select, delete
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, joinedload
-import time
 from fast_plaid import filtering
 from pathlib import Path
-from sentence_transformers import SentenceTransformer
 
 from .models import Document, Page
 from .embed import (
-    ColDocEmbedder,
     ColPageEmbedder,
     TfIdfDocEmbedder,
     BM25DocEmbedder,
     BiEncoderPageEmbedder,
+    QwenBiEncoderPageEmbedder,
 )
+from .embed import _last_token_pool_embed
 from .utils import timefunction, get_device
 
 
@@ -106,7 +106,11 @@ class PageRanking:
             scores.append(score)
 
         with Session(engine) as session:
-            stmt = select(Page).where(Page.id.in_(page_ids))
+            stmt = (
+                select(Page)
+                .options(joinedload(Page.document))
+                .where(Page.id.in_(page_ids))
+            )
             pages = session.scalars(stmt).all()
 
         # order docs in same order as doc_ids
@@ -213,12 +217,11 @@ class BiEncoderPageRanker(PageRanker):
         self,
         engine,
         model_name: str,
-        embedder_name: str,
         data_dir: Path = Path("../data"),
     ):
         self.engine = engine
         self.embedder = BiEncoderPageEmbedder(
-            model_name, embedder_name, get_device(), data_dir
+            model_name, get_device(), data_dir, _last_token_pool_embed
         )
 
     def fit(self, page_ids: list[int]):
@@ -231,13 +234,12 @@ class BiEncoderPageRanker(PageRanker):
         query_results = []
         with Session(self.engine) as session:
             for query_embedding in query_embeddings:
-                vec = query_embedding.cpu().tolist()
+                vec = query_embedding
                 rows = session.execute(
                     select(
                         Page.id,
                         (1 - Page.embedding.cosine_distance(vec)).label("score"),
                     )
-                    .options(joinedload(Page.document))
                     .where(Page.embedding.isnot(None))
                     .order_by(Page.embedding.cosine_distance(vec))
                     .limit(top_k)
@@ -252,47 +254,36 @@ class BiEncoderPageRanker(PageRanker):
         return rankings
 
 
-class ColDocRanker(DocRanker):
-    def __init__(self, embed_model, index, engine: Engine):
-        self.embedder = ColDocEmbedder(embed_model)
-        self.index = index
-        self.engine = engine
-
-    def fit(self, doc_ids: list[int]):
-        self.embedder.embed_docs(doc_ids, self.engine, self.index)
-
-    def rank(self, queries: list[str], top_k: int = 100) -> list[DocRanking]:
-        query_embeddings = self.embedder.embed_queries(queries)
-
-        print(f"query embedding shape: {query_embeddings.shape}")
-
-        scores = self.index.search(queries_embeddings=query_embeddings, top_k=100)
-
-        index_ids = list({pid for query_scores in scores for pid, _ in query_scores})
-        index_to_doc_id = get_index_to_doc_id_mapping(self.index, index_ids)
-
-        rankings = list()
-        for query_i, query_scores in enumerate(scores):
-            score_tuples = [
-                (index_to_doc_id[index_id], score)
-                for index_id, score in query_scores[:top_k]
-                if index_id in index_to_doc_id
-            ]
-            rankings.append(
-                DocRanking.from_tuples(queries[query_i], score_tuples, self.engine)
-            )
-
-        return rankings
-
-
 class ColPageRanker(PageRanker):
-    def __init__(self, embed_model, index, engine: Engine):
-        self.embedder = ColPageEmbedder(embed_model)
+    def __init__(self, embedder: ColPageEmbedder, index, engine: Engine):
+        self.embedder = embedder
         self.index = index
         self.engine = engine
+
+    @timefunction
+    def _index_batch(
+        self, page_embeddings: torch.Tensor, page_ids: list[int], total_pages: int
+    ):
+        # separates page embeddings tensor along first (page) dimension into individual page tensors
+        page_embeddings = list(torch.unbind(page_embeddings, dim=0))
+
+        self.index.update(
+            documents_embeddings=page_embeddings,
+            metadata=[{"page_id": id} for id in page_ids],
+            start_from_scratch=math.sqrt(total_pages),
+        )
+
+        del page_embeddings
+        torch.cuda.empty_cache()
+
+        peak_allocated = torch.cuda.max_memory_allocated()
+        print(f"peak VRAM allocation: {peak_allocated / 1024**3:.2f} GB")
+
+    def index_pages(self):
+        pass
 
     def fit(self, page_ids: list[int]):
-        self.embedder.embed_pages(page_ids, self.engine, self.index)
+        self.embedder.embed_pages(page_ids, self.engine)
 
     def rank(self, queries: list[str], top_k: int = 100) -> list[PageRanking]:
         query_embeddings = self.embedder.embed_queries(queries)
@@ -312,7 +303,7 @@ class ColPageRanker(PageRanker):
                 if index_id in index_to_page_id
             ]
             rankings.append(
-                DocRanking.from_tuples(queries[query_i], score_tuples, self.engine)
+                PageRanking.from_tuples(queries[query_i], score_tuples, self.engine)
             )
 
         return rankings

@@ -73,19 +73,21 @@ def convert_doc_to_text(doc_path: Path) -> str:
 
 def convert_docs_to_texts(doc_paths: list[Path]):
     texts = list()
+    successful = list()
     failed = list()
+
     for doc_path in doc_paths:
         try:
             text = convert_doc_to_text(doc_path)
             texts.append(text)
+            successful.append(doc_path)
         except Exception as e:
             print(f"Skipping {doc_path}: {e}")
             failed.append(doc_path)
-            texts.append("")
     if failed:
         print(f"Failed to convert {len(failed)} file(s): {failed}")
 
-    return texts
+    return texts, successful, failed
 
 
 def _verify_image(path: Path) -> bool:
