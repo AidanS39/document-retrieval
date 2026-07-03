@@ -11,7 +11,7 @@ from scipy.sparse import csr_matrix
 import bm25s
 from transformers import AutoModel, AutoProcessor, PreTrainedModel, ProcessorMixin
 from transformers.image_utils import load_image
-from .utils import timefunction
+from .utils import timefunction, print_gpu_stats
 import time
 
 
@@ -84,10 +84,21 @@ class TransformersBasedEmbedder:
         self.device = device
         self.data_dir = data_dir
 
+    def load_metadata(self, embeddings_dir: Path):
+        metadata_path = embeddings_dir / "metadata.pt"
+        if metadata_path.is_file():
+            metadata = torch.load(metadata_path)
+        else:
+            embeddings_dir.mkdir(parents=True, exist_ok=True)
+            metadata = {"page_ids": list(), "num_batches": 0}
+        return metadata, metadata_path
+
     @staticmethod
     def get_model_and_processor(model_name: str, device: torch.device, data_dir: Path):
         models_dir = data_dir / "models"
         model_dir = models_dir / model_name
+
+        print_gpu_stats()
 
         if model_dir.exists():
             print(f"{model_name} found locally. loading from {model_dir}...")
@@ -98,9 +109,9 @@ class TransformersBasedEmbedder:
                 dtype=torch.bfloat16,
                 attn_implementation="sdpa",
             ).eval()
+            print(f"loading {model_name} processor from {model_dir}...")
             processor = AutoProcessor.from_pretrained(
                 pretrained_model_name_or_path=str(model_dir),
-                device_map=device,
                 trust_remote_code=True,
             )
         else:
@@ -112,15 +123,17 @@ class TransformersBasedEmbedder:
                 dtype=torch.bfloat16,
                 attn_implementation="sdpa",
             ).eval()
+            print(f"loading {model_name} processor from remote...")
             processor = AutoProcessor.from_pretrained(
                 pretrained_model_name_or_path=model_name,
-                device_map=device,
                 trust_remote_code=True,
             )
 
             print(f"saving {model_name} to {model_dir}")
             model.save_pretrained(str(model_dir))
             processor.save_pretrained(str(model_dir))
+
+        print_gpu_stats()
 
         return model, processor
 
@@ -523,4 +536,91 @@ class NemotronColPageEmbedder(ColPageEmbedder):
     @timefunction
     def embed_queries(self, queries: list[str]):
         embeddings = self.model.forward_queries(queries, batch_size=8)
+        return embeddings
+
+
+class WebAIColPageEmbedder(ColPageEmbedder):
+    def _process_batch(self, images: list):
+        inputs = self.processor.process_images(images=images)
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+        return inputs
+
+    @timefunction
+    def _embed_batch(self, inputs: list):
+        with torch.no_grad():
+            embeddings = self.model(**inputs)
+        return embeddings.to(torch.float16)
+
+    @timefunction
+    def embed_pages(self, page_ids: list[int], engine: Engine, batch_size: int = 32):
+        embeddings_dir = self.data_dir / "embeddings" / self.model_name
+        batch_ids = list()
+
+        metadata, metadata_path = self.load_metadata(embeddings_dir)
+
+        # remove page ids that have already been embedded
+        embedded_page_ids = set(metadata["page_ids"])
+        page_ids = [id for id in page_ids if id not in embedded_page_ids]
+
+        i = 0
+        while i < len(page_ids):
+            batch_ids = page_ids[i : i + batch_size]
+            images, successful_page_ids, failed_page_ids = self._preprocess_batch(
+                batch_ids, engine
+            )
+
+            if len(successful_page_ids) <= 0:
+                print(
+                    f"WARNING: no page images could be loaded for page batch {page_ids}. skipping embedding generation for batch."
+                )
+                page_embeddings = list()
+            else:
+                inputs = self._process_batch(images)
+
+                page_embeddings = self._embed_batch(inputs)
+
+                print("after embedding: ", end="")
+                print_gpu_stats()
+
+                print(f"image embeddings shape: {page_embeddings.shape}")
+
+                torch.cuda.empty_cache()
+
+                embeddings_batch = {
+                    "embeddings": page_embeddings,
+                    "page_ids": successful_page_ids,
+                }
+                embeddings_batch_path = (
+                    embeddings_dir / f"batch_{metadata['num_batches']}.pt"
+                )
+
+                print(
+                    f"saving embeddings batch at {embeddings_batch_path}... DO NOT EXIT"
+                )
+
+                torch.save(embeddings_batch, embeddings_batch_path)
+                metadata["num_batches"] += 1
+                metadata["page_ids"].extend(successful_page_ids)
+                torch.save(metadata, metadata_path)
+
+                print(f"saved embeddings batch at {embeddings_batch_path}.")
+
+                i += batch_size
+
+            if len(failed_page_ids) > 0:
+                failed_pages = [
+                    {"id": id, "col_embeddings_failed": True} for id in failed_page_ids
+                ]
+
+                with Session(engine) as session:
+                    session.execute(update(Page), failed_pages)
+                    session.commit()
+
+    @timefunction
+    def embed_queries(self, queries: list[str]):
+        inputs = self.processor.process_queries(texts=queries)
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+        with torch.inference_mode():
+            embeddings = self.model(**inputs)
+        embeddings = embeddings.to(torch.float16)
         return embeddings

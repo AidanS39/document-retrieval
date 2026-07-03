@@ -44,6 +44,19 @@ def get_device() -> torch.device:
     return device
 
 
+def gpu_stats():
+    return (
+        torch.cuda.memory_allocated() / 1e9,
+        torch.cuda.memory_reserved() / 1e9,
+        torch.cuda.max_memory_allocated() / 1e9,
+    )
+
+
+def print_gpu_stats():
+    alloc, reserved, peak = gpu_stats()
+    print(f"allocated={alloc:.2f} GB | reserved={reserved:.2f} GB | peak={peak:.2f} GB")
+
+
 def db_initialized(data_dir: Path = Path("../data")):
     db_init_path = data_dir / ".db_initialized"
     if db_init_path.is_file():

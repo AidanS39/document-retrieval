@@ -1,5 +1,3 @@
-import math
-import torch
 from abc import ABC, abstractmethod
 import bm25s
 from sklearn.metrics.pairwise import cosine_similarity
@@ -19,6 +17,7 @@ from .embed import (
     QwenBiEncoderPageEmbedder,
 )
 from .embed import _last_token_pool_embed
+from .indexing import Indexer
 from .utils import timefunction, get_device
 
 
@@ -215,14 +214,13 @@ class BM25DocRanker(DocRanker):
 class BiEncoderPageRanker(PageRanker):
     def __init__(
         self,
+        embedder: BiEncoderPageEmbedder,
         engine,
-        model_name: str,
         data_dir: Path = Path("../data"),
     ):
         self.engine = engine
-        self.embedder = BiEncoderPageEmbedder(
-            model_name, get_device(), data_dir, _last_token_pool_embed
-        )
+        self.embedder = embedder
+        self.data_dir = data_dir
 
     def fit(self, page_ids: list[int]):
         self.embedder.embed_pages(page_ids, self.engine)
@@ -255,45 +253,27 @@ class BiEncoderPageRanker(PageRanker):
 
 
 class ColPageRanker(PageRanker):
-    def __init__(self, embedder: ColPageEmbedder, index, engine: Engine):
+    def __init__(self, embedder: ColPageEmbedder, indexer: Indexer, engine: Engine):
         self.embedder = embedder
-        self.index = index
+        self.indexer = indexer
         self.engine = engine
-
-    @timefunction
-    def _index_batch(
-        self, page_embeddings: torch.Tensor, page_ids: list[int], total_pages: int
-    ):
-        # separates page embeddings tensor along first (page) dimension into individual page tensors
-        page_embeddings = list(torch.unbind(page_embeddings, dim=0))
-
-        self.index.update(
-            documents_embeddings=page_embeddings,
-            metadata=[{"page_id": id} for id in page_ids],
-            start_from_scratch=math.sqrt(total_pages),
-        )
-
-        del page_embeddings
-        torch.cuda.empty_cache()
-
-        peak_allocated = torch.cuda.max_memory_allocated()
-        print(f"peak VRAM allocation: {peak_allocated / 1024**3:.2f} GB")
-
-    def index_pages(self):
-        pass
 
     def fit(self, page_ids: list[int]):
         self.embedder.embed_pages(page_ids, self.engine)
+        self.index_pages(len(page_ids))
 
+    @timefunction
     def rank(self, queries: list[str], top_k: int = 100) -> list[PageRanking]:
         query_embeddings = self.embedder.embed_queries(queries)
 
         print(f"query embedding shape: {query_embeddings.shape}")
 
-        scores = self.index.search(queries_embeddings=query_embeddings, top_k=100)
+        scores = self.indexer.index.search(
+            queries_embeddings=query_embeddings, top_k=100
+        )
 
         index_ids = list({pid for query_scores in scores for pid, _ in query_scores})
-        index_to_page_id = get_index_to_page_id_mapping(self.index, index_ids)
+        index_to_page_id = get_index_to_page_id_mapping(self.indexer.index, index_ids)
 
         rankings = list()
         for query_i, query_scores in enumerate(scores):

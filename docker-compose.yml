@@ -43,6 +43,8 @@ services:
       - ./src:/app/src
     env_file:
       - .env
+    environment:
+      - HF_HOME=/app/test/.cache/huggingface
     depends_on:
       db:
         condition: service_healthy

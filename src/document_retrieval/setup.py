@@ -3,9 +3,8 @@ import psycopg
 from psycopg import sql
 from sqlalchemy import create_engine
 from sqlalchemy import text
-from sqlalchemy import select, insert
+from sqlalchemy import select, insert, func
 from sqlalchemy.orm import Session
-from fast_plaid import search
 import torch
 
 from .preprocessing import find_docs
@@ -15,7 +14,8 @@ from .utils import sanitize_strings, sanitize_string
 from .utils import get_device, timefunction
 from .utils import mark_db_as_initialized, mark_db_as_seeded
 from .models import Base, Document, Page
-from .embed import BiEncoderPageEmbedder, NemotronColPageEmbedder
+from .embed import BiEncoderPageEmbedder, NemotronColPageEmbedder, WebAIColPageEmbedder
+from .indexing import Indexer
 
 
 class DatabaseSetup:
@@ -102,22 +102,16 @@ class EmbeddingSetup:
         self.data_dir = data_dir
 
     @timefunction
-    def setup_page_embeddings(self, model_name: str, embed_func, device: torch.device):
+    def setup_embeddings(self, embedder, device: torch.device, batch_size: int = 32):
         with Session(self.engine) as session:
             stmt = select(Page.id)
             page_ids = list(session.scalars(stmt).all())
 
-        embedder = BiEncoderPageEmbedder(model_name, device, self.data_dir, embed_func)
+        embedder.embed_pages(page_ids, self.engine, batch_size)
 
-        embedder.embed_pages(page_ids, self.engine)
-
-    @timefunction
-    def setup_col_embeddings(self, model_name: str, device: torch.device):
-        device = get_device()
-
+    def setup_col_index(self, indexer: str, device: torch.device):
         with Session(self.engine) as session:
-            stmt = select(Page.id)
-            page_ids = list(session.scalars(stmt).all())
+            stmt = select(func.count()).select_from(Page)
+            total_pages = session.scalar(stmt)
 
-        embedder = NemotronColPageEmbedder(model_name, device, self.data_dir)
-        embedder.embed_pages(page_ids, self.engine)
+        indexer.index_pages(total_pages)

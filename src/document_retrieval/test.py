@@ -4,7 +4,7 @@ from pathlib import Path
 from sqlalchemy.engine import URL
 from sqlalchemy.engine import create_engine
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import select, func
 import torch
 from fast_plaid import search, filtering
 
@@ -12,7 +12,8 @@ from .models import Document, Page
 from .setup import DatabaseSetup
 from .utils import get_device
 from .utils import timefunction
-from .embed import ColPageEmbedder, NemotronColPageEmbedder
+from .embed import ColPageEmbedder, WebAIColPageEmbedder
+from .indexing import Indexer
 from .ranking import BiEncoderPageRanker, ColPageRanker, delete_docs, delete_pages
 from .ranking import TfIdfDocRanker, BM25DocRanker
 
@@ -151,32 +152,36 @@ def test_qwen_bi_encoder(engine, queries, data_dir):
         print(ranking)
 
 
-def test_col(engine, queries: list[str], data_dir: Path = Path("../test")):
-    model_name = "nvidia/llama-nemotron-colembed-vl-3b-v2"
-
-    device = get_device()
-    embedder = NemotronColPageEmbedder(model_name, device, data_dir)
-
-    indexes_dir = data_dir / "indexes"
-    index = search.FastPlaid(
-        index=str(indexes_dir / (model_name + "_index")),
-        device=device,
-        low_memory=False,
-    )
+def test_col_embed(
+    embedder, engine, data_dir: Path, device: torch.device, batch_size: int = 32
+):
 
     with Session(engine) as session:
         stmt = select(Page.id)
-        page_ids = list(session.scalars(stmt).all())
+        page_ids = session.scalars(stmt).all()
 
-    ranker = ColPageRanker(embedder, index, engine)
-    ranker.fit(page_ids)
-    # rankings = ranker.rank(queries)
-    #
-    # for ranking in rankings:
-    #     print(ranking)
+    embedder.embed_pages(page_ids, engine, batch_size)
 
 
-def test_setup(conn_url, data_dir: Path = Path("../test")):
+def test_col_index(indexer, engine, data_dir: Path, device: torch.device):
+    with Session(engine) as session:
+        stmt = select(func.count()).select_from(Page)
+        total_pages = session.scalar(stmt)
+
+    indexer.index_pages(total_pages)
+
+
+def test_col_rank(
+    ranker, engine, queries: list[str], data_dir: Path, device: torch.device
+):
+
+    rankings = ranker.rank(queries)
+
+    for ranking in rankings:
+        print(ranking)
+
+
+def test_setup(conn_url, data_dir: Path):
     setup = DatabaseSetup(conn_url, data_dir)
     setup.setup_db(overwrite=True)
     setup.seed_db()
@@ -184,6 +189,8 @@ def test_setup(conn_url, data_dir: Path = Path("../test")):
 
 def main():
     data_dir = Path("../test")
+
+    device = torch.device("cuda:1")
 
     DB_DRIVER = os.getenv("DB_DRIVER", "postgresql")
     DB_USER = os.getenv("DB_USER")
@@ -211,10 +218,22 @@ def main():
 
     queries = ["What is magnetic reconnection?", "How does the ramp-up process work?"]
 
+    # col_model_name = "nvidia/llama-nemotron-colembed-vl-3b-v2"
+    col_model_name = "webAI-Official/webAI-ColVec1-9b"
+    col_model_name = "webAI-Official/webAI-ColVec1-4b"
+
+    embedder = WebAIColPageEmbedder(col_model_name, device, data_dir)
+    # test_col_embed(embedder, engine, data_dir, device, batch_size=32)
+
+    indexer = Indexer(col_model_name, device, data_dir)
+    test_col_index(indexer, engine, data_dir, device)
+
     # test_tf_idf(engine, queries)
     # test_bm25(engine, queries)
     # test_bi_encoder(engine, queries, data_dir)
-    test_col(engine, queries, data_dir)
+
+    ranker = ColPageRanker(embedder, indexer, engine)
+    test_col_rank(ranker, engine, queries, data_dir, device)
 
 
 if __name__ == "__main__":
