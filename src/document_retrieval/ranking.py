@@ -2,10 +2,9 @@ from abc import ABC, abstractmethod
 import bm25s
 from sklearn.metrics.pairwise import cosine_similarity
 from scipy.sparse import csr_matrix
-from sqlalchemy import select, delete
+from sqlalchemy import select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, joinedload
-from fast_plaid import filtering
 from pathlib import Path
 
 from .models import Document, Page
@@ -14,11 +13,9 @@ from .embed import (
     TfIdfDocEmbedder,
     BM25DocEmbedder,
     BiEncoderPageEmbedder,
-    QwenBiEncoderPageEmbedder,
 )
-from .embed import _last_token_pool_embed
 from .indexing import Indexer
-from .utils import timefunction, get_device
+from .utils import timefunction
 
 
 class DocRank:
@@ -124,18 +121,12 @@ class PageRanking:
 
 
 class DocRanker(ABC):
-    def __init__(self):
-        pass
-
     @abstractmethod
     def rank(self, queries: list[str], top_k: int = 100) -> list[DocRanking]:
         pass
 
 
 class PageRanker(ABC):
-    def __init__(self):
-        pass
-
     @abstractmethod
     def rank(self, queries: list[str], top_k: int = 100) -> list[PageRanking]:
         pass
@@ -148,13 +139,13 @@ class TfIdfDocRanker(DocRanker):
     engine: Engine
 
     def __init__(self, engine):
-        self.embedder = TfIdfDocEmbedder()
+        self.embedder = TfIdfDocEmbedder(engine)
         self.engine = engine
 
     @timefunction
     def fit(self, doc_ids: list[int]):
         self.doc_ids = doc_ids
-        self.doc_embeddings = self.embedder.embed_docs(doc_ids, self.engine)
+        self.doc_embeddings = self.embedder.embed_docs(doc_ids)
 
     @timefunction
     def rank(self, queries: list[str], top_k: int = 100) -> list[DocRanking]:
@@ -183,13 +174,13 @@ class BM25DocRanker(DocRanker):
 
     def __init__(self, engine):
         super().__init__()
-        self.embedder = BM25DocEmbedder()
+        self.embedder = BM25DocEmbedder(engine)
         self.engine = engine
 
     @timefunction
     def fit(self, doc_ids: list[int]):
         self.doc_ids = doc_ids
-        self.embedder.embed_docs(doc_ids, self.engine)
+        self.embedder.embed_docs(doc_ids)
 
     @timefunction
     def rank(self, queries: list[str], top_k: int = 100) -> list[DocRanking]:
@@ -258,33 +249,17 @@ class ColPageRanker(PageRanker):
         self.indexer = indexer
         self.engine = engine
 
-    def fit(self, page_ids: list[int]):
-        self.embedder.embed_pages(page_ids, self.engine)
-        self.index_pages(len(page_ids))
-
     @timefunction
     def rank(self, queries: list[str], top_k: int = 100) -> list[PageRanking]:
         query_embeddings = self.embedder.embed_queries(queries)
 
         print(f"query embedding shape: {query_embeddings.shape}")
 
-        scores = self.indexer.index.search(
-            queries_embeddings=query_embeddings, top_k=100
-        )
-
-        index_ids = list({pid for query_scores in scores for pid, _ in query_scores})
-        index_to_page_id = get_index_to_page_id_mapping(self.indexer.index, index_ids)
+        scores = self.indexer.retrieve(query_embeddings, top_k)
 
         rankings = list()
-        for query_i, query_scores in enumerate(scores):
-            score_tuples = [
-                (index_to_page_id[index_id], score)
-                for index_id, score in query_scores[:top_k]
-                if index_id in index_to_page_id
-            ]
-            rankings.append(
-                PageRanking.from_tuples(queries[query_i], score_tuples, self.engine)
-            )
+        for i in range(len(queries)):
+            rankings.append(PageRanking.from_tuples(queries[i], scores[i], self.engine))
 
         return rankings
 
@@ -295,73 +270,3 @@ class ColPageRanker(PageRanker):
 #         super().__init__()
 #     def rank(self, queries: list[str], top_k: int = 100) -> list[PageRanking]:
 #         pass
-
-
-def delete_docs(engine, index, doc_ids: list[int]) -> None:
-    index_ids = sorted(get_doc_index_ids(index, doc_ids))
-
-    with Session(engine) as session:
-        session.execute(delete(Document).where(Document.id.in_(doc_ids)))
-        index.delete(index_ids)
-        session.commit()
-
-
-def delete_pages(engine, index, page_ids: list[int]) -> None:
-    index_ids = sorted(get_page_index_ids(index, page_ids))
-
-    with Session(engine) as session:
-        session.execute(delete(Page).where(Page.id.in_(page_ids)))
-        index.delete(index_ids)
-        session.commit()
-
-
-def get_doc_ids(index, index_ids: list[int]) -> list[int]:
-    metadata_rows = filtering.get(index=index.index, subset=index_ids)
-    return [row["doc_id"] for row in metadata_rows]
-
-
-def get_doc_index_ids(index, doc_ids: list[int]) -> list[int]:
-    placeholders = ", ".join(["?"] * len(doc_ids))
-    metadata_rows = filtering.get(
-        index=index.index, condition=f"doc_id IN ({placeholders})", parameters=doc_ids
-    )
-    return [row["_subset_"] for row in metadata_rows]
-
-
-def get_index_to_doc_id_mapping(index, index_ids: list[int]) -> dict[int, int]:
-    metadata_rows = filtering.get(index=index.index, subset=index_ids)
-    return {row["_subset_"]: row["doc_id"] for row in metadata_rows}
-
-
-def get_doc_to_index_mapping(index, doc_ids: list[int]) -> dict[int, int]:
-    placeholders = ", ".join(["?"] * len(doc_ids))
-    metadata_rows = filtering.get(
-        index=index.index, condition=f"doc_id IN ({placeholders})", parameters=doc_ids
-    )
-    return {row["doc_id"]: row["_subset_"] for row in metadata_rows}
-
-
-def get_page_ids(index, index_ids: list[int]) -> list[int]:
-    metadata_rows = filtering.get(index=index.index, subset=index_ids)
-    return [row["page_id"] for row in metadata_rows]
-
-
-def get_page_index_ids(index, page_ids: list[int]) -> list[int]:
-    placeholders = ", ".join(["?"] * len(page_ids))
-    metadata_rows = filtering.get(
-        index=index.index, condition=f"page_id IN ({placeholders})", parameters=page_ids
-    )
-    return [row["_subset_"] for row in metadata_rows]
-
-
-def get_index_to_page_id_mapping(index, index_ids: list[int]) -> dict[int, int]:
-    metadata_rows = filtering.get(index=index.index, subset=index_ids)
-    return {row["_subset_"]: row["page_id"] for row in metadata_rows}
-
-
-def get_page_to_index_mapping(index, page_ids: list[int]) -> dict[int, int]:
-    placeholders = ", ".join(["?"] * len(page_ids))
-    metadata_rows = filtering.get(
-        index=index.index, condition=f"page_id IN ({placeholders})", parameters=page_ids
-    )
-    return {row["page_id"]: row["_subset_"] for row in metadata_rows}

@@ -1,23 +1,40 @@
 import math
 import gc
 import torch
-from .utils import timefunction, gpu_stats
-from fast_plaid import search
+from fast_plaid import search, filtering
+from abc import ABC, abstractmethod
 from pathlib import Path
+from sqlalchemy import delete
+from sqlalchemy.orm import Session
+from .utils import timefunction, gpu_stats
+from .models import Page
 
 
-class Indexer:
-    def __init__(
-        self, index_name, device: torch.device, data_dir: Path, low_memory: bool = False
-    ):
-        self.index = search.FastPlaid(
-            index=str(data_dir / "indexes" / (index_name)),
-            device=device,
-            low_memory=low_memory,
-        )
+class Indexer(ABC):
+    def __init__(self, index_name, device: torch.device, data_dir: Path):
         self.index_name = index_name
         self.device = device
         self.data_dir = data_dir
+
+    @abstractmethod
+    def index_pages(self, total_pages: int):
+        pass
+
+    @abstractmethod
+    def retrieve(self, query_embeddings, top_k: int = 25):
+        pass
+
+
+class FastPlaidIndexer(Indexer):
+    def __init__(
+        self, index_name, device: torch.device, data_dir: Path, low_memory: bool = False
+    ):
+        super().__init__(index_name, device, data_dir)
+        self.index = search.FastPlaid(
+            index=str(data_dir / "indexes" / (index_name)),
+            device=str(device),
+            low_memory=low_memory,
+        )
 
     @timefunction
     def _index_batch(
@@ -65,3 +82,54 @@ class Indexer:
                     )
 
                     print(f"{i + 1}/{num_batches} batches indexed.")
+
+    def retrieve(self, query_embeddings, top_k: int = 25):
+        scores = self.index.search(queries_embeddings=query_embeddings, top_k=top_k)
+
+        index_ids = list({pid for query_scores in scores for pid, _ in query_scores})
+        index_to_page_id = self.get_index_to_page_id_mapping(index_ids)
+
+        score_tuples = list()
+        for query_scores in scores:
+            score_tuples.append(
+                [
+                    (index_to_page_id[index_id], score)
+                    for index_id, score in query_scores[:top_k]
+                    if index_id in index_to_page_id
+                ]
+            )
+        return score_tuples
+
+    def delete_pages(self, engine, page_ids: list[int]) -> None:
+        index_ids = sorted(self.get_index_ids(page_ids))
+
+        with Session(engine) as session:
+            session.execute(delete(Page).where(Page.id.in_(page_ids)))
+            self.index.delete(index_ids)
+            session.commit()
+
+    def get_page_ids(self, index_ids: list[int]) -> list[int]:
+        metadata_rows = filtering.get(index=self.index, subset=index_ids)
+        return [row["page_id"] for row in metadata_rows]
+
+    def get_index_ids(self, page_ids: list[int]) -> list[int]:
+        placeholders = ", ".join(["?"] * len(page_ids))
+        metadata_rows = filtering.get(
+            index=self.index,
+            condition=f"page_id IN ({placeholders})",
+            parameters=page_ids,
+        )
+        return [row["_subset_"] for row in metadata_rows]
+
+    def get_index_to_page_id_mapping(self, index_ids: list[int]) -> dict[int, int]:
+        metadata_rows = filtering.get(index=self.index, subset=index_ids)
+        return {row["_subset_"]: row["page_id"] for row in metadata_rows}
+
+    def get_page_id_to_index_mapping(self, page_ids: list[int]) -> dict[int, int]:
+        placeholders = ", ".join(["?"] * len(page_ids))
+        metadata_rows = filtering.get(
+            index=self.index,
+            condition=f"page_id IN ({placeholders})",
+            parameters=page_ids,
+        )
+        return {row["page_id"]: row["_subset_"] for row in metadata_rows}

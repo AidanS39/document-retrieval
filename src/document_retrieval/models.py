@@ -38,28 +38,5 @@ class Page(Base):
     document: Mapped["Document"] = relationship(back_populates="pages")
     image_path: Mapped[str]
     number: Mapped[int]
-    image_failed: Mapped[bool] = mapped_column(
-        default=False
-    )  # whether page failed to convert to image
-    embedding: Mapped[Optional[VECTOR]] = mapped_column(
-        VECTOR(2048)
-    )  # dense single vector embeddings for bi-encoder
-    embedding_failed: Mapped[bool] = mapped_column(
-        default=False
-    )  # whether embedding failed to generate for page
-    col_embeddings_failed: Mapped[bool] = mapped_column(
-        default=False
-    )  # whether col embeddings failed to generate for page
-    gemini_page_embedding: Mapped[Optional["GeminiPageEmbedding"]] = relationship(
-        back_populates="page"
-    )
-
-
-class GeminiPageEmbedding(Base):
-    __tablename__ = "gemini_page_embedding"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    page_id: Mapped[int] = mapped_column(
-        ForeignKey("page.id", ondelete="CASCADE"), unique=True
-    )
-    page: Mapped["Page"] = relationship(back_populates="gemini_page_embedding")
-    embedding: Mapped[Optional[VECTOR]] = mapped_column(VECTOR(1536))
+    embedding: Mapped[Optional[VECTOR]] = mapped_column(VECTOR(2048))
+    gemini_embedding: Mapped[Optional[VECTOR]] = mapped_column(VECTOR(1536))
