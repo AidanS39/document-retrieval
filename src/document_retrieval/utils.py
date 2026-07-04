@@ -3,12 +3,6 @@ import re
 from functools import wraps
 import torch
 from pathlib import Path
-from sentence_transformers import SentenceTransformer
-from transformers import AutoModel, AutoProcessor
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
-from .models import Document
 
 
 # decorator that prints function execution time

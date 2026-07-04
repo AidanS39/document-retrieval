@@ -1,19 +1,17 @@
 import os
 from dotenv import load_dotenv
 from pathlib import Path
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine
 from sqlalchemy.engine import URL
-from sqlalchemy.orm import Session
-from document_retrieval.models import Document
 from document_retrieval.utils import db_initialized, db_seeded, get_device
-from document_retrieval.setup import DatabaseSetup, EmbeddingSetup
+from document_retrieval.setup import DatabaseSetup
 from document_retrieval.embed import (
     _last_token_pool_embed,
     BiEncoderPageEmbedder,
     NemotronColPageEmbedder,
     WebAIColPageEmbedder,
 )
-from document_retrieval.indexing import Indexer
+from document_retrieval.indexing import FastPlaidIndexer
 from document_retrieval.ranking import ColPageRanker, BiEncoderPageRanker
 
 load_dotenv()
@@ -62,19 +60,21 @@ def choose_ranker(device, data_dir, engine):
     model = options[model_id]
 
     if model["type"] == "col":
-        indexer = Indexer(model["name"], device, data_dir, low_memory=True)
+        indexer = FastPlaidIndexer(model["name"], device, data_dir, low_memory=True)
         match model["subtype"]:
             case "webAI":
-                embedder = WebAIColPageEmbedder(model["name"], device, data_dir)
+                embedder = WebAIColPageEmbedder(model["name"], engine, device, data_dir)
             case "nvidia":
-                embedder = NemotronColPageEmbedder(model["name"], device, data_dir)
+                embedder = NemotronColPageEmbedder(
+                    model["name"], engine, device, data_dir
+                )
 
         ranker = ColPageRanker(embedder, indexer, engine)
     elif model["type"] == "biencoder":
         match model["subtype"]:
             case "Qwen":
                 embedder = BiEncoderPageEmbedder(
-                    model["name"], device, data_dir, _last_token_pool_embed
+                    model["name"], engine, device, data_dir, _last_token_pool_embed
                 )
         ranker = BiEncoderPageRanker(engine, embedder, data_dir)
 
@@ -82,7 +82,7 @@ def choose_ranker(device, data_dir, engine):
 
 
 def main():
-    data_dir = Path(os.getenv("DATA_DIR"))
+    data_dir = Path(os.getenv("DATA_DIR", "../data"))
 
     device = get_device()
 

@@ -147,10 +147,9 @@ def _convert_doc_to_images(
 
 
 def convert_docs_to_images(
-    engine, data_dir: Path, dpi: int = 150, max_workers: int = None
+    engine, data_dir: Path, dpi: int = 150, max_workers: int = 4
 ):
-    if max_workers is None:
-        max_workers = min(os.cpu_count() or 4, 4)
+    max_workers = min(os.cpu_count() or 4, max_workers)
     images_dir = data_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
 

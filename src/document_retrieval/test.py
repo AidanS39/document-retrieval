@@ -12,9 +12,9 @@ from .models import Document, Page
 from .setup import DatabaseSetup
 from .utils import get_device
 from .utils import timefunction
-from .embed import ColPageEmbedder, WebAIColPageEmbedder
-from .indexing import Indexer
-from .ranking import BiEncoderPageRanker, ColPageRanker, delete_docs, delete_pages
+from .embed import WebAIColPageEmbedder
+from .indexing import FastPlaidIndexer
+from .ranking import BiEncoderPageRanker, ColPageRanker
 from .ranking import TfIdfDocRanker, BM25DocRanker
 
 load_dotenv()
@@ -43,56 +43,6 @@ class TestUtils:
 
     def test_mark_db_as_seeded():
         pass
-
-
-def test_delete_doc(engine, data_dir, doc_id):
-    indexes_dir = data_dir / "indexes"
-    index_path = indexes_dir / "test_index_docs"
-
-    index = search.FastPlaid(index=str(index_path), device="cuda", low_memory=False)
-
-    with Session(engine) as session:
-        stmt = select(Document)
-        docs = session.execute(stmt).all()
-    print(docs)
-
-    metadata_rows = filtering.get(index=index.index)
-    print(metadata_rows)
-
-    delete_docs(engine, index, [doc_id])
-
-    with Session(engine) as session:
-        stmt = select(Document)
-        docs = session.execute(stmt).all()
-    print(docs)
-
-    metadata_rows = filtering.get(index=index.index)
-    print(metadata_rows)
-
-
-def test_delete_page(engine, data_dir, page_id):
-    indexes_dir = data_dir / "indexes"
-    index_path = indexes_dir / "test_index_pages"
-
-    index = search.FastPlaid(index=str(index_path), device="cuda", low_memory=False)
-
-    with Session(engine) as session:
-        stmt = select(Page)
-        pages = session.execute(stmt).all()
-    print(pages)
-
-    metadata_rows = filtering.get(index=index.index)
-    print(metadata_rows)
-
-    delete_pages(engine, index, [page_id])
-
-    with Session(engine) as session:
-        stmt = select(Page)
-        pages = session.execute(stmt).all()
-    print(pages)
-
-    metadata_rows = filtering.get(index=index.index)
-    print(metadata_rows)
 
 
 @timefunction
@@ -222,10 +172,10 @@ def main():
     col_model_name = "webAI-Official/webAI-ColVec1-9b"
     col_model_name = "webAI-Official/webAI-ColVec1-4b"
 
-    embedder = WebAIColPageEmbedder(col_model_name, device, data_dir)
+    embedder = WebAIColPageEmbedder(col_model_name, engine, device, data_dir)
     # test_col_embed(embedder, engine, data_dir, device, batch_size=32)
 
-    indexer = Indexer(col_model_name, device, data_dir)
+    indexer = FastPlaidIndexer(col_model_name, device, data_dir)
     test_col_index(indexer, engine, data_dir, device)
 
     # test_tf_idf(engine, queries)
