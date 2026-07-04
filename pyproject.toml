@@ -14,6 +14,7 @@ description = "Implementation of a document retrieval system using multiple embe
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+  "alembic>=1.18.5",
   "bm25s>=0.3.9",
   "datasets>=5.0.0",
   "fast-plaid>=1.4.0",

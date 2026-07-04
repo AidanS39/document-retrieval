@@ -7,6 +7,9 @@ services:
       - ./src:/app/src
     env_file:
       - .env
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
     depends_on:
       db:
         condition: service_healthy
