@@ -37,7 +37,16 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["uv-script>=0.1.9"]
+dev = [
+    "pytest>=9.1.1",
+    "uv-script>=0.1.9",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+markers = [
+    "integration: marks tests as integration tests requiring a database and ML models (deselect with '-m not integration')",
+]
 
 [tool.uvs.scripts]
 remote-sync = 'rsync -avhP LOCAL_SYNC_PATH_REDACTED REMOTE_SYNC_URL_REDACTED --filter=":- .gitignore"'

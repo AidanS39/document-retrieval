@@ -5,7 +5,7 @@ from sqlalchemy import pool
 
 from alembic import context
 
-from document_retrieval.models import Base
+from src.document_retrieval.models import Base
 
 import os
 from sqlalchemy import URL

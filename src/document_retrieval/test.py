@@ -1,4 +1,6 @@
 import os
+import shutil
+import tempfile
 from dotenv import load_dotenv
 from pathlib import Path
 from sqlalchemy.engine import URL
@@ -129,6 +131,41 @@ def test_col_rank(
 
     for ranking in rankings:
         print(ranking)
+
+
+def test_delete_duplicates(device: torch.device):
+    tmp_dir = Path(tempfile.mkdtemp())
+    try:
+        indexer = FastPlaidIndexer("test_dedup", device, tmp_dir)
+
+        page_id = 42
+        num_tokens = 4
+        dim = 128
+
+        for _ in range(3):
+            embedding = torch.randn(num_tokens, dim)
+            indexer.index.update(
+                documents_embeddings=[embedding],
+                metadata=[{"page_id": page_id}],
+                start_from_scratch=2,
+                n_samples_kmeans=2,
+                buffer_size=100,
+            )
+
+        pre_rows = filtering.get(index=indexer.index)
+        assert len(pre_rows) == 3, f"Expected 3 entries before dedup, got {len(pre_rows)}"
+
+        deleted_count = indexer.delete_duplicates()
+
+        assert deleted_count == 2, f"Expected 2 deleted, got {deleted_count}"
+
+        post_rows = filtering.get(index=indexer.index)
+        assert len(post_rows) == 1, f"Expected 1 remaining entry, got {len(post_rows)}"
+        assert post_rows[0]["page_id"] == page_id, f"Remaining entry has wrong page_id: {post_rows[0]['page_id']}"
+
+        print("test_delete_duplicates passed.")
+    finally:
+        shutil.rmtree(tmp_dir)
 
 
 def test_setup(conn_url, data_dir: Path):

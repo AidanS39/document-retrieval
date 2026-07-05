@@ -40,9 +40,10 @@ services:
     shm_size: '2gb'
     profiles:
       - test
-    command: uv run python -m document_retrieval.test
+    command: uv run pytest
     volumes:
-      - ./test:/app/test
+      - ./test_data:/app/test_data
+      - ./tests:/app/tests
       - ./src:/app/src
     env_file:
       - .env

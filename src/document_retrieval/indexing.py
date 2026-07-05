@@ -30,8 +30,9 @@ class FastPlaidIndexer(Indexer):
         self, index_name, device: torch.device, data_dir: Path, low_memory: bool = False
     ):
         super().__init__(index_name, device, data_dir)
+        self.index_path = data_dir / "indexes" / index_name
         self.index = search.FastPlaid(
-            index=str(data_dir / "indexes" / (index_name)),
+            index=str(self.index_path),
             device=str(device),
             low_memory=low_memory,
         )
@@ -108,27 +109,44 @@ class FastPlaidIndexer(Indexer):
             self.index.delete(index_ids)
             session.commit()
 
+    def delete_duplicates(self) -> int:
+        metadata_rows = filtering.get(index=str(self.index_path))
+
+        page_id_to_index_ids: dict[int, list[int]] = {}
+        for row in metadata_rows:
+            page_id_to_index_ids.setdefault(row["page_id"], []).append(row["_subset_"])
+
+        duplicate_index_ids: list[int] = []
+        for index_ids in page_id_to_index_ids.values():
+            if len(index_ids) > 1:
+                duplicate_index_ids.extend(index_ids[1:])
+
+        if duplicate_index_ids:
+            self.index.delete(sorted(duplicate_index_ids))
+
+        return len(duplicate_index_ids)
+
     def get_page_ids(self, index_ids: list[int]) -> list[int]:
-        metadata_rows = filtering.get(index=self.index, subset=index_ids)
+        metadata_rows = filtering.get(index=str(self.index_path), subset=index_ids)
         return [row["page_id"] for row in metadata_rows]
 
     def get_index_ids(self, page_ids: list[int]) -> list[int]:
         placeholders = ", ".join(["?"] * len(page_ids))
         metadata_rows = filtering.get(
-            index=self.index,
+            index=str(self.index_path),
             condition=f"page_id IN ({placeholders})",
             parameters=page_ids,
         )
         return [row["_subset_"] for row in metadata_rows]
 
     def get_index_to_page_id_mapping(self, index_ids: list[int]) -> dict[int, int]:
-        metadata_rows = filtering.get(index=self.index, subset=index_ids)
+        metadata_rows = filtering.get(index=(self.index_path), subset=index_ids)
         return {row["_subset_"]: row["page_id"] for row in metadata_rows}
 
     def get_page_id_to_index_mapping(self, page_ids: list[int]) -> dict[int, int]:
         placeholders = ", ".join(["?"] * len(page_ids))
         metadata_rows = filtering.get(
-            index=self.index,
+            index=(self.index_path),
             condition=f"page_id IN ({placeholders})",
             parameters=page_ids,
         )
