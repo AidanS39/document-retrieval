@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
-from .utils import timefunction, gpu_stats
+from .utils import timefunction, gpu_stats, print_gpu_stats
 from .models import Page
 
 
@@ -60,7 +60,7 @@ class FastPlaidIndexer(Indexer):
     def index_pages(self, total_pages: int):
         embeddings_dir = self.data_dir / "embeddings" / self.index_name
         metadata_path = embeddings_dir / "metadata.pt"
-        with torch.no_grad():
+        with torch.inference_mode():
             if metadata_path.is_file() is False:
                 print(
                     f"WARNING: embeddings metadata could not be found at {metadata_path}. Could not index embeddings."
@@ -85,7 +85,11 @@ class FastPlaidIndexer(Indexer):
                     print(f"{i + 1}/{num_batches} batches indexed.")
 
     def retrieve(self, query_embeddings, top_k: int = 25):
+        print("REACHED RETRIEVE")
+        print_gpu_stats()
         scores = self.index.search(queries_embeddings=query_embeddings, top_k=top_k)
+        print("AFTER SCORES")
+        print_gpu_stats()
 
         index_ids = list({pid for query_scores in scores for pid, _ in query_scores})
         index_to_page_id = self.get_index_to_page_id_mapping(index_ids)
@@ -138,6 +142,11 @@ class FastPlaidIndexer(Indexer):
             parameters=page_ids,
         )
         return [row["_subset_"] for row in metadata_rows]
+
+    def get_missing_page_ids(self, page_ids: list[int]) -> list[int]:
+        metadata_rows = filtering.get(index=str(self.index_path))
+        indexed_page_ids = {row["page_id"] for row in metadata_rows}
+        return [pid for pid in page_ids if pid not in indexed_page_ids]
 
     def get_index_to_page_id_mapping(self, index_ids: list[int]) -> dict[int, int]:
         metadata_rows = filtering.get(index=(self.index_path), subset=index_ids)

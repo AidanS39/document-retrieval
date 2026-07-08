@@ -17,3 +17,11 @@ plans/
 mutagen.yml
 mutagen.yml.lock
 **.env
+
+# jupyter
+.ipynb_checkpoints/
+
+# nstx data
+nstx_embeddings.csv
+nstx_papers.csv
+nstx_embeddings.*

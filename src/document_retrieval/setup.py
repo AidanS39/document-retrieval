@@ -96,7 +96,7 @@ class DatabaseSetup:
 
 
 class EmbeddingSetup:
-    def __init__(self, engine: Engine, data_dir: Path = Path("../data")):
+    def __init__(self, engine: Engine, data_dir: Path):
         self.engine = engine
         self.data_dir = data_dir
 

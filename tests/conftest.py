@@ -33,8 +33,8 @@ def engine():
 
 
 @pytest.fixture(scope="session")
-def test_data_dir() -> Path:
-    return Path(__file__).parent.parent / "test_data"
+def data_dir() -> Path:
+    return Path(__file__).parent.parent / "test"
 
 
 @pytest.fixture

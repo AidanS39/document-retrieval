@@ -40,14 +40,17 @@ services:
     shm_size: '2gb'
     profiles:
       - test
-    command: uv run pytest
+    working_dir: /app
+    command: uv run pytest -s
     volumes:
-      - ./test_data:/app/test_data
+      - ./test:/app/test
       - ./tests:/app/tests
       - ./src:/app/src
     env_file:
       - .env
     environment:
+      - POSTGRES_DATABASE=test
+      - DB_DATABASE=test
       - HF_HOME=/app/test/.cache/huggingface
     depends_on:
       db:

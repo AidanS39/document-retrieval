@@ -3,7 +3,7 @@ import os
 from dotenv import load_dotenv
 from pathlib import Path
 from sqlalchemy.engine import URL
-from document_retrieval.setup import Setup
+from document_retrieval.setup import DatabaseSetup
 
 load_dotenv()
 
@@ -20,7 +20,7 @@ def main():
     )
     args = parser.parse_args()
 
-    data_dir = Path("../data")
+    data_dir = Path(os.getenv("TEST_DATA_DIR", "test"))
 
     conn_url = URL.create(
         drivername=os.getenv("DB_DRIVER", "postgresql"),
@@ -32,7 +32,7 @@ def main():
     )
 
     print("seeding database")
-    setup = Setup(conn_url, data_dir)
+    setup = DatabaseSetup(conn_url, data_dir)
     setup.seed_db()
     print("database successfully seeded")
 

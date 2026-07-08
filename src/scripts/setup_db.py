@@ -3,7 +3,7 @@ import os
 from dotenv import load_dotenv
 from pathlib import Path
 from sqlalchemy.engine import URL
-from document_retrieval.setup import Setup
+from document_retrieval.setup import DatabaseSetup
 
 load_dotenv()
 
@@ -32,7 +32,7 @@ def main():
     )
 
     print("setting up database")
-    setup = Setup(conn_url, data_dir)
+    setup = DatabaseSetup(conn_url, data_dir)
     setup.setup_db(overwrite=args.overwrite)
     print("database successfully set up")
 

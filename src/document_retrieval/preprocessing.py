@@ -139,7 +139,6 @@ def _convert_doc_to_images(
                     "document_id": doc_id,
                     "image_path": str(image_path),
                     "number": page_num + 1,
-                    "is_corrupt": is_corrupt,
                 }
             )
 
@@ -179,11 +178,10 @@ def convert_docs_to_images(
             session.execute(insert(Page), all_pages)
             session.commit()
 
-    corrupt_count = sum(1 for p in all_pages if p["is_corrupt"])
     print(
-        f"Done: {len(all_pages)} pages from {len(docs) - len(failed_docs)} documents. {corrupt_count} corrupt page(s)."
+        f"Done: {len(all_pages)} pages from {len(docs) - len(failed_docs)} documents."
     )
     if failed_docs:
         print(f"Failed documents ({len(failed_docs)}): {failed_docs}")
 
-    return len(all_pages), corrupt_count
+    return len(all_pages)

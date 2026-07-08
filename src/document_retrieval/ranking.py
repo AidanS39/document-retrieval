@@ -1,3 +1,5 @@
+import gc
+import torch
 from abc import ABC, abstractmethod
 import bm25s
 from sklearn.metrics.pairwise import cosine_similarity
@@ -15,7 +17,7 @@ from .embed import (
     BiEncoderPageEmbedder,
 )
 from .indexing import Indexer
-from .utils import timefunction
+from .utils import timefunction, print_gpu_stats
 
 
 class DocRank:
@@ -251,7 +253,13 @@ class ColPageRanker(PageRanker):
 
     @timefunction
     def rank(self, queries: list[str], top_k: int = 100) -> list[PageRanking]:
+        print_gpu_stats()
         query_embeddings = self.embedder.embed_queries(queries)
+
+        print_gpu_stats()
+        torch.cuda.empty_cache()
+        gc.collect()
+        print_gpu_stats()
 
         print(f"query embedding shape: {query_embeddings.shape}")
 

@@ -203,7 +203,7 @@ class TransformersBasedPageEmbedder(PageEmbedder):
             model.save_pretrained(str(model_dir))
             processor.save_pretrained(str(model_dir))
 
-        print_gpu_stats()
+        print(f"{model_name} loaded successfully.")
 
         return model, processor
 
@@ -253,7 +253,7 @@ class BiEncoderPageEmbedder(TransformersBasedPageEmbedder):
     @timefunction
     def _embed_batch(self, inputs):
 
-        with torch.no_grad():
+        with torch.inference_mode():
             embeddings = self.embed_func(self.model, inputs)
 
         return embeddings
@@ -323,7 +323,7 @@ class BiEncoderPageEmbedder(TransformersBasedPageEmbedder):
             self.device
         )
 
-        with torch.no_grad():
+        with torch.inference_mode():
             embeddings = self.embed_func(self.model, inputs).to("cpu").tolist()
         return embeddings
 
@@ -342,9 +342,12 @@ class ColPageEmbedder(TransformersBasedPageEmbedder):
         self.metadata = self.load_metadata()
 
     def load_metadata(self):
+        print(f"loading metadata for {self.model_name}")
         if self.metadata_path.is_file():
+            print(f"metadata found at {self.metadata_path}")
             metadata = torch.load(self.metadata_path)
         else:
+            print(f"metadata not found at {self.metadata_path}.")
             self.embeddings_path.mkdir(parents=True, exist_ok=True)
             metadata = {"page_ids": list(), "num_batches": 0}
         return metadata
@@ -369,8 +372,6 @@ class ColPageEmbedder(TransformersBasedPageEmbedder):
 
         torch.save(self.metadata, self.metadata_path)
 
-        pass
-
     def embed_pages(self, page_ids: list[int], batch_size: int = 64):
         i = 0
         while i < len(page_ids):
@@ -383,6 +384,7 @@ class ColPageEmbedder(TransformersBasedPageEmbedder):
                 )
             else:
                 embeddings = self._embedding_pipeline(images)
+                print(embeddings.shape)
 
                 self._postprocess_batch(embeddings, successful_ids)
 
@@ -413,7 +415,7 @@ class WebAIColPageEmbedder(ColPageEmbedder):
 
     @timefunction
     def _embed_batch(self, inputs):
-        with torch.no_grad():
+        with torch.inference_mode():
             embeddings = self.model(**inputs)
         return embeddings.to(torch.float16)
 
@@ -426,6 +428,34 @@ class WebAIColPageEmbedder(ColPageEmbedder):
     @timefunction
     def embed_queries(self, queries: list[str]):
         inputs = self.processor.process_queries(texts=queries)
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+        with torch.inference_mode():
+            embeddings = self.model(**inputs)
+        embeddings = embeddings.to(torch.float16)
+        return embeddings
+
+
+class TomoroAIColPageEmbedder(ColPageEmbedder):
+    def _process_batch(self, images: list[Image]):
+        inputs = self.processor.process_images(images=images)
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+        return inputs
+
+    @timefunction
+    def _embed_batch(self, inputs):
+        with torch.inference_mode():
+            embeddings = self.model(**inputs)
+        return embeddings.to(torch.float16)
+
+    @timefunction
+    def _embedding_pipeline(self, images: list[Image]):
+        inputs = self._process_batch(images)
+        embeddings = self._embed_batch(inputs)
+        return embeddings
+
+    @timefunction
+    def embed_queries(self, queries: list[str]):
+        inputs = self.processor.process_texts(texts=queries)
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
         with torch.inference_mode():
             embeddings = self.model(**inputs)

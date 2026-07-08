@@ -27,7 +27,7 @@ BI_ENCODER_MODELS = [
 
 class EmbeddingTests:
     """
-    Reusable test helpers for embedder classes.
+    test helpers for embedder classes
     """
 
     @staticmethod
@@ -40,6 +40,7 @@ class EmbeddingTests:
         - A new batch file is written for each batch processed
         - Each batch file contains 'embeddings' and 'page_ids' with matching counts
         """
+        print(embedder.metadata)
         initial_num_batches = embedder.metadata["num_batches"]
 
         embedder.embed_pages(page_ids)

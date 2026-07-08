@@ -1,3 +1,5 @@
+from document_retrieval.utils import get_device
+from document_retrieval.indexing import FastPlaidIndexer
 import os
 from dotenv import load_dotenv
 from pathlib import Path
@@ -15,7 +17,9 @@ DB_DATABASE = os.getenv("DB_DATABASE")
 
 
 def main():
-    data_dir = Path("../data")
+    data_dir = Path(os.getenv("DATA_DIR", "/app/data"))
+
+    device = get_device()
 
     conn_url = URL.create(
         drivername=DB_DRIVER,
@@ -29,10 +33,10 @@ def main():
 
     setup = EmbeddingSetup(engine, data_dir)
 
-    # setup embeddings for col embedder
-    index_name = "llama-nemotron-colembed-vl-3b-v2_index"
-    col_model_name = "nvidia/llama-nemotron-colembed-vl-3b-v2"
-    setup.setup_col_embeddings(col_model_name, index_name)
+    index_name = "webAI-Official/webAI-ColVec1-9b"
+    indexer = FastPlaidIndexer(index_name, device, data_dir, low_memory=True)
+
+    setup.setup_col_index(indexer)
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 from sqlalchemy.engine import URL, create_engine
 from document_retrieval.utils import get_device
-from document_retrieval.embed import BiEncoderPageEmbedder
+from document_retrieval.embed import BiEncoderPageEmbedder, _last_token_pool_embed
 from document_retrieval.setup import EmbeddingSetup
 
 load_dotenv()
@@ -20,7 +20,6 @@ def main():
     data_dir = Path("../data")
 
     model_name = "Qwen/Qwen3-VL-Embedding-2B"
-    embed_name = model_name + "_embedding"
     device = get_device()
 
     print(f"Starting embedding process for {model_name}")
@@ -38,7 +37,9 @@ def main():
     setup = EmbeddingSetup(engine, data_dir)
 
     # setup embeddings for bi encoder
-    embedder = BiEncoderPageEmbedder(model_name, embed_name, device, data_dir)
+    embedder = BiEncoderPageEmbedder(
+        model_name, engine, device, data_dir, _last_token_pool_embed
+    )
 
     setup.setup_page_embeddings(embedder)
 
