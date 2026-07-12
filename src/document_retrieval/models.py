@@ -57,16 +57,24 @@ class NSTXPaper(Base):
     abstract: Mapped[Optional[str]]
     key_findings: Mapped[Optional[str]]
     experiment_type: Mapped[Optional[str]]
+    document_type: Mapped[Optional[str]]
+    page_count: Mapped[Optional[int]]
+    nstx_embeddings: Mapped[List["NSTXEmbedding"]] = relationship(
+        back_populates="paper", cascade="all, delete-orphan"
+    )
 
 
 class NSTXEmbedding(Base):
     __tablename__ = "nstx_embeddings"
     id: Mapped[int] = mapped_column(primary_key=True)
     paper_id: Mapped[int] = mapped_column(ForeignKey("nstx_papers.id", ondelete="CASCADE"))
+    paper: Mapped["NSTXPaper"] = relationship(
+        back_populates="nstx_embeddings",   
+    )
     content_type: Mapped[str]
     chunk_index: Mapped[Optional[int]]
     page_number: Mapped[Optional[int]]
-    figure_id: Mapped[Optional[int]] = mapped_column(ForeignKey("nstx_figures.id", ondelete="CASCADE"))
+    figure_id: Mapped[Optional[str]]
     content: Mapped[Optional[str]]
     image_uri: Mapped[Optional[str]]
     section: Mapped[Optional[str]]

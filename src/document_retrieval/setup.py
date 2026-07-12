@@ -13,7 +13,7 @@ from .utils import sanitize_strings, sanitize_string
 from .utils import timefunction
 from .utils import mark_db_as_initialized, mark_db_as_seeded
 from .models import Base, Document, Page
-from .embed import PageEmbedder
+from .embedding import PageEmbedder
 from .indexing import Indexer
 
 

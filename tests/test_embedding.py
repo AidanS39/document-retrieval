@@ -3,17 +3,27 @@ import torch
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from document_retrieval.embed import (
+from document_retrieval.embedding import (
     BiEncoderPageEmbedder,
     ColPageEmbedder,
     NemotronColPageEmbedder,
-    WebAIColPageEmbedder,
+    WebAIColPageEmbedder, TomoroAIColPageEmbedder, Qwen3_5ColPageEmbedder,
 )
 from document_retrieval.models import Page
 
 WEBAI_MODELS = [
     "webAI-Official/webAI-ColVec1-4b",
     "webAI-Official/webAI-ColVec1-9b",
+]
+
+TOMOROAI_MODELS = [
+    "TomoroAI/tomoro-colqwen3-embed-4b",
+    "TomoroAI/tomoro-colqwen3-embed-8b",
+]
+
+QWEN3_5_MODELS = [
+    "vultr/VultronRetrieverCore-Qwen3.5-4.5B",
+    "athrael-soju/colqwen3.5-4.5B-v3"
 ]
 
 NEMOTRON_MODELS = [
@@ -99,6 +109,20 @@ class EmbeddingTests:
 @pytest.mark.parametrize("model_name", WEBAI_MODELS)
 def test_webai_embed_pages(model_name: str, device, engine, data_dir, page_ids):
     embedder = WebAIColPageEmbedder(model_name, engine, device, data_dir)
+    EmbeddingTests.test_col_embed_pages(embedder, page_ids)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("model_name", TOMOROAI_MODELS)
+def test_tomoroai_embed_pages(model_name: str, device, engine, data_dir, page_ids):
+    embedder = TomoroAIColPageEmbedder(model_name, engine, device, data_dir)
+    EmbeddingTests.test_col_embed_pages(embedder, page_ids)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("model_name", QWEN3_5_MODELS)
+def test_qwen3_5_embed_pages(model_name: str, device, engine, data_dir, page_ids):
+    embedder = Qwen3_5ColPageEmbedder(model_name, engine, device, data_dir)
     EmbeddingTests.test_col_embed_pages(embedder, page_ids)
 
 

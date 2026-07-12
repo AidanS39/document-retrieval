@@ -14,7 +14,7 @@ from .models import Document, Page
 from .setup import DatabaseSetup
 from .utils import get_device
 from .utils import timefunction
-from .embed import WebAIColPageEmbedder
+from .embedding import WebAIColPageEmbedder
 from .indexing import FastPlaidIndexer
 from .ranking import BiEncoderPageRanker, ColPageRanker
 from .ranking import TfIdfDocRanker, BM25DocRanker

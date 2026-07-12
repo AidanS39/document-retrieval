@@ -5,6 +5,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./src:/app/src
+      - ./migrations:/app/migrations
     env_file:
       - .env
     environment:

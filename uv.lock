@@ -518,6 +518,25 @@ wheels = [
 ]
 
 [[package]]
+name = "colpali-engine"
+version = "0.3.17"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "peft" },
+    { name = "pillow" },
+    { name = "requests" },
+    { name = "scipy" },
+    { name = "torch" },
+    { name = "torchvision" },
+    { name = "transformers" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c1/b6/2346706c984456fa78110edd5c24ade2aba03853152a68b7fbde82b00197/colpali_engine-0.3.17.tar.gz", hash = "sha256:bffebf23a04d1bf081e7420cfe7d5f6e356bd03e3ae8438282fa4da1bbb5bb6c", size = 204054, upload-time = "2026-06-08T14:11:09.136Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9d/2e/d703c21fe64ed562a8f163f73774f0fec684fedcefb0d8b73b4394eff68c/colpali_engine-0.3.17-py3-none-any.whl", hash = "sha256:362784700c532449c29424890e8ebe6b329307e9e9ea4906b0834d5b331c6dfd", size = 112292, upload-time = "2026-06-08T14:11:07.841Z" },
+]
+
+[[package]]
 name = "comm"
 version = "0.2.3"
 source = { registry = "https://pypi.org/simple" }
@@ -677,6 +696,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "alembic" },
     { name = "bm25s" },
+    { name = "colpali-engine" },
     { name = "datasets" },
     { name = "fast-plaid" },
     { name = "huggingface-hub" },
@@ -708,6 +728,7 @@ dev = [
 requires-dist = [
     { name = "alembic", specifier = ">=1.18.5" },
     { name = "bm25s", specifier = ">=0.3.9" },
+    { name = "colpali-engine", specifier = ">=0.3.17" },
     { name = "datasets", specifier = ">=5.0.0" },
     { name = "fast-plaid", specifier = ">=1.4.0" },
     { name = "huggingface-hub", specifier = ">=1.18.0" },

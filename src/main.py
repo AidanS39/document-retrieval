@@ -5,7 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.engine import URL
 from document_retrieval.utils import db_initialized, db_seeded, get_device
 from document_retrieval.setup import DatabaseSetup
-from document_retrieval.embed import (
+from document_retrieval.embedding import (
     _last_token_pool_embed,
     BiEncoderPageEmbedder,
     NemotronColPageEmbedder,

@@ -9,12 +9,17 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, joinedload
 from pathlib import Path
 
-from .models import Document, Page
-from .embed import (
-    ColPageEmbedder,
+from .models import (
+    Document, 
+    Page, 
+    NSTXPaper, 
+    NSTXEmbedding
+)
+from .embedding import (
     TfIdfDocEmbedder,
     BM25DocEmbedder,
     BiEncoderPageEmbedder,
+    ColPageEmbedder, GeminiBiEncoderPageEmbedder
 )
 from .indexing import Indexer
 from .utils import timefunction, print_gpu_stats
@@ -76,6 +81,13 @@ class PageRank:
         self.score = score
 
 
+class NSTXPaperRank:
+    def __init__(self, embedding: NSTXEmbedding, position: int, score: float):
+        self.embedding = embedding
+        self.position = position
+        self.score = score
+
+
 class PageRanking:
     def __init__(self, query: str, ranks: list[PageRank]):
         self.query = query
@@ -118,6 +130,56 @@ class PageRanking:
         ranks = [
             PageRank(page=page, position=i + 1, score=score)
             for i, (page, score) in enumerate(zip(pages, scores))
+        ]
+        return cls(query, ranks)
+
+
+class NSTXViewPaperRanking:
+    def __init__(self, query: str, ranks: list[NSTXPaperRank]):
+        self.query = query
+        self.ranks = ranks
+
+    def __str__(self):
+        lines = [
+            f"Query: {self.query}",
+            f"{'Rank':<6} {'Score':<10} {'ID':<8} {'Filename':<30} {'Type':<12} {'Chunk':<6} {'Pages':<12} {'Section'}",
+            "-" * 100,
+        ]
+        for rank in self.ranks:
+            emb = rank.embedding
+            filename = (emb.paper.original_filename or "")[:28]
+            pages = (
+                f"{emb.page_start}-{emb.page_end}"
+                if emb.page_start is not None and emb.page_end is not None
+                else (str(emb.page_number) if emb.page_number is not None else "")
+            )
+            lines.append(
+                f"{rank.position:<6} {rank.score:<10.4f} {emb.id:<8} {filename:<30} {emb.content_type:<12} "
+                f"{str(emb.chunk_index) if emb.chunk_index is not None else '':<6} {pages:<12} {emb.section or ''}"
+            )
+        return "\n".join(lines)
+
+    @classmethod
+    def from_tuples(cls, query: str, rank_tuples: list[tuple[int, float]], engine):
+        rank_tuples = sorted(rank_tuples, key=lambda t: t[1], reverse=True)
+
+        embedding_ids = [emb_id for emb_id, _ in rank_tuples]
+        scores = [score for _, score in rank_tuples]
+
+        with Session(engine) as session:
+            stmt = (
+                select(NSTXEmbedding)
+                .options(joinedload(NSTXEmbedding.paper))
+                .where(NSTXEmbedding.id.in_(embedding_ids))
+            )
+            embeddings = session.scalars(stmt).all()
+
+        id_to_embedding = {emb.id: emb for emb in embeddings}
+        embeddings = [id_to_embedding[emb_id] for emb_id in embedding_ids]
+
+        ranks = [
+            NSTXPaperRank(embedding=emb, position=i + 1, score=score)
+            for i, (emb, score) in enumerate(zip(embeddings, scores))
         ]
         return cls(query, ranks)
 
@@ -241,6 +303,47 @@ class BiEncoderPageRanker(PageRanker):
         for query, rows in zip(queries, query_results):
             score_tuples = [(page_id, score) for page_id, score in rows]
             rankings.append(PageRanking.from_tuples(query, score_tuples, self.engine))
+
+        return rankings
+
+
+class NSTXViewBiEncoderPageRanker(BiEncoderPageRanker):
+    def __init__(
+        self,
+        embedder: GeminiBiEncoderPageEmbedder,
+        engine,
+        data_dir: Path = Path("../data"),
+    ):
+        self.engine = engine
+        self.embedder = embedder
+        self.data_dir = data_dir
+
+    def fit(self, page_ids: list[int]):
+        self.embedder.embed_pages(page_ids, self.engine)
+
+    @timefunction
+    def rank(self, queries: list[str], top_k: int = 100) -> list[NSTXViewPaperRanking]:
+        query_embeddings = self.embedder.embed_queries(queries)
+
+        query_results = []
+        with Session(self.engine) as session:
+            for query_embedding in query_embeddings:
+                vec = query_embedding
+                rows = session.execute(
+                    select(
+                        NSTXEmbedding.id,
+                        (1 - NSTXEmbedding.embedding.cosine_distance(vec)).label("score"),
+                    )
+                    .where(NSTXEmbedding.embedding.isnot(None))
+                    .order_by(NSTXEmbedding.embedding.cosine_distance(vec))
+                    .limit(top_k)
+                ).all()
+                query_results.append(rows)
+
+        rankings = []
+        for query, rows in zip(queries, query_results):
+            score_tuples = [(page_id, score) for page_id, score in rows]
+            rankings.append(NSTXViewPaperRanking.from_tuples(query, score_tuples, self.engine))
 
         return rankings
 

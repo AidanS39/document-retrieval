@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 from sqlalchemy.engine import URL, create_engine
 from document_retrieval.utils import get_device
-from document_retrieval.embed import BiEncoderPageEmbedder, _last_token_pool_embed
+from document_retrieval.embedding import BiEncoderPageEmbedder, _last_token_pool_embed
 from document_retrieval.setup import EmbeddingSetup
 
 load_dotenv()
