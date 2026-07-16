@@ -20,7 +20,7 @@ def main():
     )
     args = parser.parse_args()
 
-    data_dir = Path("../data")
+    data_dir = Path(os.getenv("DATA_DIR", "/app/data"))
 
     conn_url = URL.create(
         drivername=os.getenv("DB_DRIVER", "postgresql"),

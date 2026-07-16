@@ -3,7 +3,7 @@ services:
     build: .
     shm_size: '2gb'
     volumes:
-      - ./data:/app/data
+      - ./nstx_data:/app/data
       - ./src:/app/src
       - ./migrations:/app/migrations
     env_file:

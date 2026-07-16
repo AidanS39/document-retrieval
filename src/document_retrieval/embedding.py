@@ -163,8 +163,7 @@ class TransformersBasedPageEmbedder(PageEmbedder):
 
     @staticmethod
     def get_model_and_processor(
-        model_name: str, device: torch.device, data_dir: Path
-    ) -> tuple[PreTrainedModel, ProcessorMixin]:
+        model_name: str, device: torch.device, data_dir: Path):
         models_dir = data_dir / "models"
         model_dir = models_dir / model_name
 
@@ -371,7 +370,7 @@ class ColPageEmbedder(TransformersBasedPageEmbedder):
         }
 
         embeddings_batch_path = (
-            self.embeddings_path / f"_{self.metadata['num_batches']}"
+            self.embeddings_path / f"batch_{self.metadata['num_batches']}.pt"
         )
         torch.save(embeddings_batch, embeddings_batch_path)
 
@@ -384,7 +383,7 @@ class ColPageEmbedder(TransformersBasedPageEmbedder):
         i = 0
         while i < len(page_ids):
             batch_ids = page_ids[i : i + batch_size]
-            images, successful_ids, failed_ids = self._preprocess_batch(batch_ids)
+            images, successful_ids, _ = self._preprocess_batch(batch_ids)
 
             if len(successful_ids) <= 0:
                 print(
@@ -405,7 +404,7 @@ class ColPageEmbedder(TransformersBasedPageEmbedder):
 
 class NemotronColPageEmbedder(ColPageEmbedder):
     @timefunction
-    def _embedding_pipeline(self, images: list[Image]):
+    def _embedding_pipeline(self, images: list[Image]) -> torch.Tensor:
         embeddings = self.model.forward_images(images, batch_size=64)
         return embeddings
 
@@ -428,7 +427,7 @@ class WebAIColPageEmbedder(ColPageEmbedder):
         return embeddings.to(torch.float16)
 
     @timefunction
-    def _embedding_pipeline(self, images: list[Image]):
+    def _embedding_pipeline(self, images: list[Image]) -> torch.Tensor:
         inputs = self._process_batch(images)
         embeddings = self._embed_batch(inputs)
         return embeddings
@@ -456,7 +455,7 @@ class TomoroAIColPageEmbedder(ColPageEmbedder):
         return embeddings.to(torch.float16)
 
     @timefunction
-    def _embedding_pipeline(self, images: list[Image]):
+    def _embedding_pipeline(self, images: list[Image]) -> torch.Tensor:
         inputs = self._process_batch(images)
         embeddings = self._embed_batch(inputs)
         return embeddings
@@ -515,7 +514,7 @@ class Qwen3_5ColPageEmbedder(ColPageEmbedder):
         return model, processor
     
     def _process_batch(self, images: list[Image]):
-        inputs = self.processor.process_images(images=images)
+        inputs = self.processor.process_images(images=images).to(self.device)
         return inputs
 
     @timefunction
@@ -525,7 +524,7 @@ class Qwen3_5ColPageEmbedder(ColPageEmbedder):
         return embeddings.to(torch.float16)
 
     @timefunction
-    def _embedding_pipeline(self, images: list[Image]):
+    def _embedding_pipeline(self, images: list[Image]) -> torch.Tensor:
         inputs = self._process_batch(images)
         embeddings = self._embed_batch(inputs)
         return embeddings

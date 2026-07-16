@@ -61,12 +61,12 @@ def convert_doc_to_text(doc_path: Path) -> str:
     match doc_path.suffix.lower():
         case ".pdf":
             return _pdf_to_text(doc_path)
-        case ".docx":
-            return _docx_to_text(doc_path)
-        case ".pptx":
-            return _pptx_to_text(doc_path)
-        case ".txt":
-            return _txt_to_text(doc_path)
+        # case ".docx":
+        #     return _docx_to_text(doc_path)
+        # case ".pptx":
+        #     return _pptx_to_text(doc_path)
+        # case ".txt":
+        #     return _txt_to_text(doc_path)
         case suffix:
             raise ValueError(f"Unsupported file format: {suffix!r} ({doc_path.name})")
 

@@ -52,31 +52,43 @@ class EmbeddingTests:
         """
         print(embedder.metadata)
         initial_num_batches = embedder.metadata["num_batches"]
+        initial_metadata = {
+            "page_ids": list(embedder.metadata["page_ids"]),
+            "num_batches": initial_num_batches,
+        }
 
         embedder.embed_pages(page_ids)
 
         metadata = torch.load(embedder.metadata_path)
 
-        assert set(page_ids).issubset(set(metadata["page_ids"])), (
-            f"Missing page_ids in metadata after embed_pages: "
-            f"{set(page_ids) - set(metadata['page_ids'])}"
-        )
-        assert metadata["num_batches"] > initial_num_batches, (
-            "No new batch files were written to disk"
-        )
+        try:
+            assert set(page_ids).issubset(set(metadata["page_ids"])), (
+                f"Missing page_ids in metadata after embed_pages: "
+                f"{set(page_ids) - set(metadata['page_ids'])}"
+            )
+            assert metadata["num_batches"] > initial_num_batches, (
+                "No new batch files were written to disk"
+            )
 
-        for i in range(initial_num_batches, metadata["num_batches"]):
-            batch_path = embedder.embeddings_path / f"_{i}"
-            assert batch_path.is_file(), (
-                f"Expected batch file _{i} not found at {batch_path}"
-            )
-            batch = torch.load(batch_path)
-            assert "embeddings" in batch, f"Batch _{i} missing 'embeddings' key"
-            assert "page_ids" in batch, f"Batch _{i} missing 'page_ids' key"
-            assert batch["embeddings"].shape[0] == len(batch["page_ids"]), (
-                f"Batch _{i}: embedding count {batch['embeddings'].shape[0]} "
-                f"does not match page_ids count {len(batch['page_ids'])}"
-            )
+            for i in range(initial_num_batches, metadata["num_batches"]):
+                batch_path = embedder.embeddings_path / f"batch_{i}.pt"
+                assert batch_path.is_file(), (
+                    f"Expected batch file _{i} not found at {batch_path}"
+                )
+                batch = torch.load(batch_path)
+                print(f"EMBEDDINGS SHAPE: {batch['embeddings'].shape}")
+                assert "embeddings" in batch, f"Batch _{i} missing 'embeddings' key"
+                assert "page_ids" in batch, f"Batch _{i} missing 'page_ids' key"
+                assert batch["embeddings"].shape[0] == len(batch["page_ids"]), (
+                    f"Batch _{i}: embedding count {batch['embeddings'].shape[0]} "
+                    f"does not match page_ids count {len(batch['page_ids'])}"
+                )
+        finally:
+            for i in range(initial_num_batches, metadata["num_batches"]):
+                batch_path = embedder.embeddings_path / f"batch_{i}.pt"
+                if batch_path.is_file():
+                    batch_path.unlink()
+            torch.save(initial_metadata, embedder.metadata_path)
 
     @staticmethod
     def test_bi_encoder_embed_pages(

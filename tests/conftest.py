@@ -16,7 +16,7 @@ load_dotenv()
 
 @pytest.fixture
 def device() -> torch.device:
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
 
 @pytest.fixture(scope="session")
