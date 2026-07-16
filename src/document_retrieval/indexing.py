@@ -1,3 +1,4 @@
+from document_retrieval.benchmarking import Timer, IndexingBatchTelemetry, PipelineMetadata
 import math
 import gc
 import torch
@@ -58,38 +59,39 @@ class FastPlaidIndexer(Indexer):
         gc.collect()
 
     def index_pages(self, total_pages: int):
-        embeddings_dir = self.data_dir / "embeddings" / self.index_name
-        metadata_path = embeddings_dir / "metadata.pt"
+        embeddings_dir = self.data_dir / "embeddings"
+        embeddings_path = embeddings_dir / self.index_name
+        metadata_path = embeddings_path / "metadata.pt"
         with torch.inference_mode():
             if metadata_path.is_file() is False:
                 print(
                     f"WARNING: embeddings metadata could not be found at {metadata_path}. Could not index embeddings."
                 )
             else:
-                metadata = torch.load(metadata_path)
+                metadata = PipelineMetadata.load(self.index_name, embeddings_dir)
 
-                num_batches = metadata["num_batches"]
                 pages_seen = 0
-                for i in range(num_batches):
-                    embeddings_batch_path = embeddings_dir / f"batch_{i}.pt"
-                    embeddings_batch = torch.load(embeddings_batch_path)
+                for i, batch_metadata in enumerate(metadata.batches):
+                    embeddings_batch = metadata.load_batch_embeddings(batch_metadata)
                     embeddings = embeddings_batch["embeddings"]
                     page_ids = embeddings_batch["page_ids"]
-                    self._index_batch(embeddings, page_ids, total_pages)
+
+                    with Timer() as timer:
+                        self._index_batch(embeddings, page_ids, total_pages)
+
+                    indexing_telemetry = IndexingBatchTelemetry(timer, page_ids, total_pages)
+                    metadata.set_indexing_telemetry(batch_metadata, indexing_telemetry)
+
                     pages_seen += len(page_ids)
                     alloc, reserved, peak = gpu_stats()
+
                     print(
                         f"{pages_seen} pages | allocated={alloc:.2f}GB | reserved={reserved:.2f}GB | GB/pages={alloc / pages_seen:.5f} | peak={peak:.2f}GB "
                     )
-
-                    print(f"{i + 1}/{num_batches} batches indexed.")
+                    print(f"{i + 1}/{len(metadata.batches)} batches indexed.")
 
     def retrieve(self, query_embeddings, top_k: int = 25):
-        print("REACHED RETRIEVE")
-        print_gpu_stats()
         scores = self.index.search(queries_embeddings=query_embeddings, top_k=top_k)
-        print("AFTER SCORES")
-        print_gpu_stats()
 
         index_ids = list({pid for query_scores in scores for pid, _ in query_scores})
         index_to_page_id = self.get_index_to_page_id_mapping(index_ids)

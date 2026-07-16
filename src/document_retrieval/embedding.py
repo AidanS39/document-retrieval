@@ -22,6 +22,7 @@ from transformers.image_utils import load_image
 
 from .models import Document, Page
 from .utils import timefunction, print_gpu_stats
+from .benchmarking import Timer, EmbeddingBatchTelemetry, BatchMetadata, PipelineTelemetry, PipelineMetadata
 
 
 def _cls_pool_embed(model: PreTrainedModel, inputs) -> torch.Tensor:
@@ -130,6 +131,7 @@ class TransformersBasedPageEmbedder(PageEmbedder):
         self.model_name = model_name
         self.device = device
         self.data_dir = data_dir
+        self.metadata = PipelineMetadata.load(model_name, data_dir / "embeddings")
 
     def _preprocess_batch(self, page_ids: list[int]):
         with Session(self.engine) as session:
@@ -160,6 +162,38 @@ class TransformersBasedPageEmbedder(PageEmbedder):
     @abstractmethod
     def _postprocess_batch(self, embeddings, page_ids: list[int]):
         pass
+    
+    def embed_pages(self, page_ids: list[int], batch_size: int = 64):
+        i = 0
+        while i < len(page_ids):
+            batch_ids = page_ids[i : i + batch_size]
+            images, successful_ids, _ = self._preprocess_batch(batch_ids)
+
+            if len(successful_ids) <= 0:
+                print(
+                    f"WARNING: no page images could be loaded for page batch {page_ids}. skipping embedding generation for batch."
+                )
+            else:
+                with Timer() as timer:
+                    embeddings = self._embedding_pipeline(images)
+                
+                batch_telemetry = EmbeddingBatchTelemetry(timer, successful_ids, embeddings.shape)
+                batch_metadata = BatchMetadata(len(self.metadata.batches), successful_ids, batch_telemetry)
+
+                self.metadata.add_batch(batch_metadata)
+                self.metadata.save()
+                
+                torch.save({
+                    "embeddings": embeddings,
+                    "page_ids": successful_ids
+                }, self.metadata.embeddings_path / f"batch_{batch_metadata.id}.pt")
+
+                self._postprocess_batch(embeddings, successful_ids)
+
+            i += batch_size
+        
+        self.metadata.save()
+        self.metadata.print_telemetry_summary()
 
     @staticmethod
     def get_model_and_processor(
@@ -275,28 +309,6 @@ class BiEncoderPageEmbedder(TransformersBasedPageEmbedder):
             session.commit()
 
     @timefunction
-    def embed_pages(self, page_ids: list[int], batch_size: int = 64):
-        i = 0
-        while i < len(page_ids):
-            batch_ids = page_ids[i : i + batch_size]
-
-            images, successful_ids, failed_ids = self._preprocess_batch(batch_ids)
-
-            if len(successful_ids) <= 0:
-                print(
-                    f"WARNING: no page images could be loaded for page batch {page_ids}. skipping embedding generation for batch."
-                )
-            else:
-                embeddings = self._embedding_pipeline(images)
-
-                self._postprocess_batch(embeddings, successful_ids)
-
-            print(
-                f"{max([i + batch_size, len(page_ids)])}/{len(page_ids)} pages embedded."
-            )
-            i += batch_size
-
-    @timefunction
     def embed_queries(self, queries: list[str]):
         instruction = "Retrieve images or text relevant to the user's query."
         messages = [
@@ -343,59 +355,13 @@ class ColPageEmbedder(TransformersBasedPageEmbedder):
         data_dir: Path,
     ):
         super().__init__(model_name, engine, device, data_dir)
-        self.embeddings_path = self.data_dir / "embeddings" / self.model_name
-        self.metadata_path = self.embeddings_path / "metadata.pt"
-        self.metadata = self.load_metadata()
-
-    def load_metadata(self):
-        print(f"loading metadata for {self.model_name}")
-        if self.metadata_path.is_file():
-            print(f"metadata found at {self.metadata_path}")
-            metadata = torch.load(self.metadata_path)
-        else:
-            print(f"metadata not found at {self.metadata_path}.")
-            self.embeddings_path.mkdir(parents=True, exist_ok=True)
-            metadata = {"page_ids": list(), "num_batches": 0}
-        return metadata
 
     @abstractmethod
     def _embedding_pipeline(self, images: list[Image]) -> torch.Tensor:
         pass
 
     def _postprocess_batch(self, embeddings, page_ids):
-        print(f"SHAPE: {embeddings[0].shape}")
-        embeddings_batch = {
-            "embeddings": embeddings,
-            "page_ids": page_ids,
-        }
-
-        embeddings_batch_path = (
-            self.embeddings_path / f"batch_{self.metadata['num_batches']}.pt"
-        )
-        torch.save(embeddings_batch, embeddings_batch_path)
-
-        self.metadata["num_batches"] += 1
-        self.metadata["page_ids"].extend(page_ids)
-
-        torch.save(self.metadata, self.metadata_path)
-
-    def embed_pages(self, page_ids: list[int], batch_size: int = 64):
-        i = 0
-        while i < len(page_ids):
-            batch_ids = page_ids[i : i + batch_size]
-            images, successful_ids, _ = self._preprocess_batch(batch_ids)
-
-            if len(successful_ids) <= 0:
-                print(
-                    f"WARNING: no page images could be loaded for page batch {page_ids}. skipping embedding generation for batch."
-                )
-            else:
-                embeddings = self._embedding_pipeline(images)
-                print(embeddings.shape)
-
-                self._postprocess_batch(embeddings, successful_ids)
-
-            i += batch_size
+        pass
 
     @abstractmethod
     def embed_queries(self, queries: list[str]):

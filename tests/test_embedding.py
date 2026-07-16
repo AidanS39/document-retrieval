@@ -46,49 +46,56 @@ class EmbeddingTests:
         Test embed_pages for any ColPageEmbedder subclass.
 
         Verifies:
-        - metadata.pt is updated with the embedded page IDs
-        - A new batch file is written for each batch processed
-        - Each batch file contains 'embeddings' and 'page_ids' with matching counts
+        - New BatchMetadata entries are added to embedder.metadata
+        - All page_ids appear across the new batches
+        - Telemetry totals are updated
+        - A batch .pt file exists for each new batch with matching embeddings and page_ids
         """
-        print(embedder.metadata)
-        initial_num_batches = embedder.metadata["num_batches"]
-        initial_metadata = {
-            "page_ids": list(embedder.metadata["page_ids"]),
-            "num_batches": initial_num_batches,
-        }
+        initial_batch_count = len(embedder.metadata.batches)
+        initial_total_pages = embedder.metadata.telemetry.total_embedding_pages
+        initial_total_time = embedder.metadata.telemetry.total_embedding_time
 
         embedder.embed_pages(page_ids)
 
-        metadata = torch.load(embedder.metadata_path)
+        new_batches = embedder.metadata.batches[initial_batch_count:]
 
         try:
-            assert set(page_ids).issubset(set(metadata["page_ids"])), (
+            assert len(new_batches) > 0, "No new batches were added to metadata"
+
+            embedded_page_ids = [pid for batch in new_batches for pid in batch.page_ids]
+            assert set(page_ids).issubset(set(embedded_page_ids)), (
                 f"Missing page_ids in metadata after embed_pages: "
-                f"{set(page_ids) - set(metadata['page_ids'])}"
-            )
-            assert metadata["num_batches"] > initial_num_batches, (
-                "No new batch files were written to disk"
+                f"{set(page_ids) - set(embedded_page_ids)}"
             )
 
-            for i in range(initial_num_batches, metadata["num_batches"]):
-                batch_path = embedder.embeddings_path / f"batch_{i}.pt"
+            assert embedder.metadata.telemetry.total_embedding_pages > initial_total_pages, (
+                "total_embedding_pages was not updated in telemetry"
+            )
+            assert embedder.metadata.telemetry.total_embedding_time > initial_total_time, (
+                "total_embedding_time was not updated in telemetry"
+            )
+
+            for batch in new_batches:
+                batch_path = embedder.metadata.embeddings_path / f"batch_{batch.id}.pt"
                 assert batch_path.is_file(), (
-                    f"Expected batch file _{i} not found at {batch_path}"
+                    f"Expected batch file not found at {batch_path}"
                 )
-                batch = torch.load(batch_path)
-                print(f"EMBEDDINGS SHAPE: {batch['embeddings'].shape}")
-                assert "embeddings" in batch, f"Batch _{i} missing 'embeddings' key"
-                assert "page_ids" in batch, f"Batch _{i} missing 'page_ids' key"
-                assert batch["embeddings"].shape[0] == len(batch["page_ids"]), (
-                    f"Batch _{i}: embedding count {batch['embeddings'].shape[0]} "
-                    f"does not match page_ids count {len(batch['page_ids'])}"
+                saved = torch.load(batch_path, weights_only=False)
+                assert "embeddings" in saved, f"Batch {batch.id} missing 'embeddings' key"
+                assert "page_ids" in saved, f"Batch {batch.id} missing 'page_ids' key"
+                assert saved["embeddings"].shape[0] == len(saved["page_ids"]), (
+                    f"Batch {batch.id}: embedding count {saved['embeddings'].shape[0]} "
+                    f"does not match page_ids count {len(saved['page_ids'])}"
                 )
         finally:
-            for i in range(initial_num_batches, metadata["num_batches"]):
-                batch_path = embedder.embeddings_path / f"batch_{i}.pt"
+            for batch in new_batches:
+                batch_path = embedder.metadata.embeddings_path / f"batch_{batch.id}.pt"
                 if batch_path.is_file():
                     batch_path.unlink()
-            torch.save(initial_metadata, embedder.metadata_path)
+            embedder.metadata.batches = embedder.metadata.batches[:initial_batch_count]
+            embedder.metadata.telemetry.total_embedding_pages = initial_total_pages
+            embedder.metadata.telemetry.total_embedding_time = initial_total_time
+            embedder.metadata.save()
 
     @staticmethod
     def test_bi_encoder_embed_pages(

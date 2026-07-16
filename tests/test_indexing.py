@@ -5,6 +5,7 @@ from pathlib import Path
 import torch
 from fast_plaid import filtering
 
+from document_retrieval.benchmarking import PipelineMetadata
 from document_retrieval.indexing import FastPlaidIndexer
 
 
@@ -58,6 +59,19 @@ def test_index_pages(device: torch.device, index_pages_embeddings):
         assert indexed_page_ids == sorted(expected_page_ids), (
             f"Expected page_ids {sorted(expected_page_ids)}, got {indexed_page_ids}"
         )
+
+        metadata = PipelineMetadata.load(index_name, data_dir / "embeddings")
+        for batch in metadata.batches:
+            assert batch.indexing_telemetry is not None, (
+                f"Batch {batch.id} is missing indexing telemetry after index_pages"
+            )
+            assert set(batch.indexing_telemetry.page_ids) == set(batch.page_ids), (
+                f"Batch {batch.id}: indexing_telemetry.page_ids {batch.indexing_telemetry.page_ids} "
+                f"does not match batch.page_ids {batch.page_ids}"
+            )
+            assert batch.indexing_telemetry.timer.elapsed >= 0, (
+                f"Batch {batch.id}: indexing elapsed time is negative"
+            )
     finally:
         if index_dir.exists():
             shutil.rmtree(index_dir)
