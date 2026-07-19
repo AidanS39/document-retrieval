@@ -24,12 +24,10 @@ from .models import Document, Page
 from .utils import timefunction, print_gpu_stats
 from .benchmarking import Timer, EmbeddingBatchTelemetry, BatchMetadata, PipelineTelemetry, PipelineMetadata
 
-
 def _cls_pool_embed(model: PreTrainedModel, inputs) -> torch.Tensor:
     outputs = model(**inputs)
     embeddings = outputs.last_hidden_state[:, 0, :]
     return F.normalize(embeddings, p=2, dim=-1)
-
 
 def _last_token_pool_embed(model: PreTrainedModel, inputs) -> torch.Tensor:
     outputs = model(**inputs)
@@ -53,7 +51,6 @@ def _mean_pool_embed(model: PreTrainedModel, inputs: dict) -> torch.Tensor:
     ).clamp(min=1e-9)
     return F.normalize(embeddings, p=2, dim=-1)
 
-
 class Embedder(ABC):
     def __init__(self, engine: Engine):
         self.engine = engine
@@ -61,7 +58,6 @@ class Embedder(ABC):
     @abstractmethod
     def embed_queries(self, queries: list[str]):
         pass
-
 
 class PageEmbedder(Embedder):
     @abstractmethod
@@ -72,7 +68,6 @@ class PageEmbedder(Embedder):
     def embed_queries(self, queries: list[str]):
         pass
 
-
 class DocEmbedder(Embedder):
     @abstractmethod
     def embed_docs(self, doc_ids: list[int], batch_size: int = 128):
@@ -81,7 +76,6 @@ class DocEmbedder(Embedder):
     @abstractmethod
     def embed_queries(self, queries: list[str]):
         pass
-
 
 class TfIdfDocEmbedder(DocEmbedder):
     def __init__(self, engine: Engine):
@@ -162,7 +156,7 @@ class TransformersBasedPageEmbedder(PageEmbedder):
     @abstractmethod
     def _postprocess_batch(self, embeddings, page_ids: list[int]):
         pass
-    
+
     def embed_pages(self, page_ids: list[int], batch_size: int = 64):
         i = 0
         while i < len(page_ids):
@@ -176,13 +170,13 @@ class TransformersBasedPageEmbedder(PageEmbedder):
             else:
                 with Timer() as timer:
                     embeddings = self._embedding_pipeline(images)
-                
+
                 batch_telemetry = EmbeddingBatchTelemetry(timer, successful_ids, embeddings.shape)
                 batch_metadata = BatchMetadata(len(self.metadata.batches), successful_ids, batch_telemetry)
 
                 self.metadata.add_batch(batch_metadata)
                 self.metadata.save()
-                
+
                 torch.save({
                     "embeddings": embeddings,
                     "page_ids": successful_ids
@@ -191,7 +185,7 @@ class TransformersBasedPageEmbedder(PageEmbedder):
                 self._postprocess_batch(embeddings, successful_ids)
 
             i += batch_size
-        
+
         self.metadata.save()
         self.metadata.print_telemetry_summary()
 
@@ -298,15 +292,16 @@ class BiEncoderPageEmbedder(TransformersBasedPageEmbedder):
         return embeddings
 
     def _postprocess_batch(self, embeddings, page_ids: list[int]):
-        embeddings = embeddings.to("cpu").tolist()
-        updated_pages = [
-            {"id": id, "embedding": embedding}
-            for id, embedding in zip(page_ids, embeddings)
-        ]
-
-        with Session(self.engine) as session:
-            session.execute(update(Page), updated_pages)
-            session.commit()
+        # embeddings = embeddings.to("cpu").tolist()
+        # updated_pages = [
+        #     {"id": id, "embedding": embedding}
+        #     for id, embedding in zip(page_ids, embeddings)
+        # ]
+        #
+        # with Session(self.engine) as session:
+        #     session.execute(update(Page), updated_pages)
+        #     session.commit()
+        pass
 
     @timefunction
     def embed_queries(self, queries: list[str]):

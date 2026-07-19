@@ -27,10 +27,10 @@ def sanitize_strings(strings: list[str]) -> list[str]:
     return [sanitize_string(s) for s in strings]
 
 
-def get_device() -> torch.device:
+def get_device(name: str = "cuda") -> torch.device:
     if torch.cuda.is_available():
         print("cuda device is available!")
-        device = torch.device("cuda")
+        device = torch.device(name)
     else:
         print("cuda device not available. falling back to cpu...")
         device = torch.device("cpu")

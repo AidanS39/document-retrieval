@@ -3,7 +3,8 @@ import psycopg
 from psycopg import sql
 from sqlalchemy import create_engine, Engine
 from sqlalchemy import text
-from sqlalchemy import select, insert, func
+from sqlalchemy import select, func
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from .preprocessing import find_docs
@@ -85,9 +86,9 @@ class DatabaseSetup:
 
         with Session(self.engine) as session:
             if len(successful_docs) > 0:
-                session.execute(insert(Document), successful_docs)
+                session.execute(insert(Document).on_conflict_do_nothing(), successful_docs)
             if len(failed_docs) > 0:
-                session.execute(insert(Document), failed_docs)
+                session.execute(insert(Document).on_conflict_do_nothing(), failed_docs)
             session.commit()
 
         convert_docs_to_images(self.engine, self.data_dir)
@@ -102,13 +103,25 @@ class EmbeddingSetup:
 
     @timefunction
     def setup_page_embeddings(self, embedder: PageEmbedder, batch_size: int = 32):
-        with Session(self.engine) as session:
-            stmt = select(Page.id)
-            page_ids = list(session.scalars(stmt).all())
+        already_embedded = {
+            pid for batch in embedder.metadata.batches for pid in batch.page_ids
+        }
 
+        with Session(self.engine) as session:
+            page_ids = [
+                pid for pid in session.scalars(select(Page.id)).all()
+                if pid not in already_embedded
+            ]
+
+        print(f"{len(already_embedded)} pages already embedded, {len(page_ids)} remaining.")
         embedder.embed_pages(page_ids, batch_size)
 
-    def setup_col_index(self, indexer: Indexer):
+class IndexingSetup:
+    def __init__(self, engine: Engine, data_dir: Path):
+        self.engine = engine
+        self.data_dir = data_dir
+    
+    def setup_page_index(self, indexer: Indexer):
         with Session(self.engine) as session:
             stmt = select(func.count()).select_from(Page)
             total_pages = session.scalar(stmt) or 0

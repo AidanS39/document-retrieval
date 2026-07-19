@@ -1,4 +1,3 @@
-import argparse
 import os
 from dotenv import load_dotenv
 from pathlib import Path
@@ -9,17 +8,6 @@ load_dotenv()
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Set up the document retrieval database."
-    )
-    parser.add_argument(
-        "--overwrite",
-        action="store_true",
-        default=False,
-        help="Drop and recreate existing tables.",
-    )
-    args = parser.parse_args()
-
     data_dir = Path(os.getenv("DATA_DIR", "/app/data"))
 
     conn_url = URL.create(

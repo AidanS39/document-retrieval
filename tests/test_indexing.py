@@ -72,6 +72,7 @@ def test_index_pages(device: torch.device, index_pages_embeddings):
             assert batch.indexing_telemetry.timer.elapsed >= 0, (
                 f"Batch {batch.id}: indexing elapsed time is negative"
             )
+        metadata.print_telemetry_summary()
     finally:
         if index_dir.exists():
             shutil.rmtree(index_dir)

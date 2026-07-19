@@ -1,8 +1,8 @@
-from sqlalchemy import ForeignKey, DateTime, func
+from sqlalchemy import ForeignKey, DateTime, Index, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import List, Optional
-from pgvector.sqlalchemy import VECTOR
+from pgvector.sqlalchemy import HALFVEC, VECTOR
 from datetime import datetime
 
 
@@ -14,7 +14,7 @@ class Document(Base):
     __tablename__ = "document"
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str]
-    path: Mapped[str]
+    path: Mapped[str] = mapped_column(unique=True)
     text: Mapped[Optional[str]]
     text_failed: Mapped[bool] = mapped_column(
         default=False
@@ -37,10 +37,24 @@ class Page(Base):
         ForeignKey("document.id", ondelete="CASCADE")
     )
     document: Mapped["Document"] = relationship(back_populates="pages")
-    image_path: Mapped[str]
+    image_path: Mapped[str] = mapped_column(unique=True)
     number: Mapped[int]
-    embedding: Mapped[Optional[VECTOR]] = mapped_column(VECTOR(2048))
+    qwen3_2b_embedding: Mapped[Optional[HALFVEC]] = mapped_column(HALFVEC(2048))
     gemini_embedding: Mapped[Optional[VECTOR]] = mapped_column(VECTOR(1536))
+    __table_args__ = (
+        Index(
+            "ix_page_qwen3_2b_embedding_hnsw",
+            "qwen3_2b_embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"qwen3_2b_embedding": "halfvec_cosine_ops"},
+        ),
+        Index(
+            "ix_page_gemini_embedding_hnsw",
+            "gemini_embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"gemini_embedding": "vector_cosine_ops"},
+        ),
+    )
 
 
 class NSTXPaper(Base):
@@ -69,7 +83,7 @@ class NSTXEmbedding(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     paper_id: Mapped[int] = mapped_column(ForeignKey("nstx_papers.id", ondelete="CASCADE"))
     paper: Mapped["NSTXPaper"] = relationship(
-        back_populates="nstx_embeddings",   
+        back_populates="nstx_embeddings",
     )
     content_type: Mapped[str]
     chunk_index: Mapped[Optional[int]]
@@ -82,3 +96,19 @@ class NSTXEmbedding(Base):
     page_end: Mapped[Optional[int]]
     embedding: Mapped[Optional[VECTOR]] = mapped_column(VECTOR(1536))
     created_at: Mapped[Optional[datetime]] = mapped_column(DateTime, server_default=func.now())
+
+
+class EvaluationAnnotation(Base):
+    __tablename__ = "evaluation_annotation"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    annotator: Mapped[str]
+    query_id: Mapped[int]
+    query: Mapped[str]
+    page_id: Mapped[int]
+    score: Mapped[int]
+    submitted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    __table_args__ = (
+        UniqueConstraint("annotator", "query_id", "page_id", name="uq_annotation"),
+    )

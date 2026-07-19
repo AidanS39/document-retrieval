@@ -105,6 +105,9 @@ class PageRanking:
             )
         return "\n".join(lines)
 
+    def to_ranking(self) -> tuple[str, list[dict[str, int]]]:
+        return self.query, [{"page_id": rank.page.id, "position": rank.position} for rank in self.ranks]
+
     @classmethod
     def from_tuples(cls, query: str, rank_tuples: list[tuple[int, float]], engine):
         rank_tuples = sorted(rank_tuples, key=lambda t: t[1], reverse=True)
@@ -271,14 +274,11 @@ class BiEncoderPageRanker(PageRanker):
         self,
         embedder: BiEncoderPageEmbedder,
         engine,
-        data_dir: Path = Path("../data"),
+        data_dir: Path,
     ):
         self.engine = engine
         self.embedder = embedder
         self.data_dir = data_dir
-
-    def fit(self, page_ids: list[int]):
-        self.embedder.embed_pages(page_ids, self.engine)
 
     @timefunction
     def rank(self, queries: list[str], top_k: int = 100) -> list[PageRanking]:
@@ -358,11 +358,6 @@ class ColPageRanker(PageRanker):
     def rank(self, queries: list[str], top_k: int = 100) -> list[PageRanking]:
         print_gpu_stats()
         query_embeddings = self.embedder.embed_queries(queries)
-
-        print_gpu_stats()
-        torch.cuda.empty_cache()
-        gc.collect()
-        print_gpu_stats()
 
         print(f"query embedding shape: {query_embeddings.shape}")
 

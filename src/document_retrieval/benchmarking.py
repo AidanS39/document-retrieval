@@ -231,3 +231,4 @@ class PipelineMetadata:
             metadata.batches.append(batch)
 
         return metadata
+

@@ -8,7 +8,8 @@ from pptx import Presentation
 from pptx.shapes.autoshape import Shape
 from PIL import Image
 from sqlalchemy.orm import Session
-from sqlalchemy import select, insert
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from .models import Document, Page
 
 
@@ -21,7 +22,10 @@ def find_docs(docs_dir: Path) -> list[Path]:
     while len(path_queue) > 0:
         cur_path = path_queue.popleft()
         if cur_path.is_file():
-            doc_paths.append(cur_path)
+            if cur_path.suffix.lower() == ".pdf":
+                doc_paths.append(cur_path)
+            else:
+                print(f"Skipping {cur_path}: not a PDF")
         else:
             for path in cur_path.iterdir():
                 path_queue.append(path)
@@ -118,6 +122,17 @@ def _convert_doc_to_images(
         doc.xref_set_key(doc.pdf_catalog(), "StructTreeRoot", "null")
         for page_num in range(len(doc)):
             image_path = image_dir / f"{doc_path.stem}_page_{page_num + 1}.jpg"
+
+            if image_path.exists():
+                pages.append(
+                    {
+                        "document_id": doc_id,
+                        "image_path": str(image_path),
+                        "number": page_num + 1,
+                    }
+                )
+                continue
+
             is_corrupt = False
 
             try:
@@ -175,7 +190,7 @@ def convert_docs_to_images(
 
     if all_pages:
         with Session(engine) as session:
-            session.execute(insert(Page), all_pages)
+            session.execute(insert(Page).on_conflict_do_nothing(), all_pages)
             session.commit()
 
     print(

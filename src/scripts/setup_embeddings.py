@@ -1,10 +1,11 @@
+import argparse
 import os
 from dotenv import load_dotenv
 from pathlib import Path
 from sqlalchemy.engine import URL, create_engine
 from document_retrieval.utils import get_device
-from document_retrieval.embedding import BiEncoderPageEmbedder, _last_token_pool_embed, Qwen3_5ColPageEmbedder
 from document_retrieval.setup import EmbeddingSetup
+from scripts.config import build_embedder, add_embedder_arg, add_device_arg
 
 load_dotenv()
 
@@ -16,14 +17,16 @@ DB_PORT = int(os.getenv("DB_PORT", "5432"))
 DB_DATABASE = os.getenv("DB_DATABASE")
 
 
-
 def main():
+    parser = argparse.ArgumentParser(description="Generate page embeddings")
+    add_embedder_arg(parser)
+    add_device_arg(parser)
+    args = parser.parse_args()
+
     data_dir = Path(os.getenv("DATA_DIR", "/app/data"))
+    device = get_device(args.device)
 
-    model_name = "vultr/VultronRetrieverCore-Qwen3.5-4.5B"
-    device = get_device()
-
-    print(f"Starting embedding process for {model_name}")
+    print(f"Starting embedding process for {args.model}")
 
     conn_url = URL.create(
         drivername=DB_DRIVER,
@@ -36,13 +39,7 @@ def main():
     engine = create_engine(conn_url)
 
     setup = EmbeddingSetup(engine, data_dir)
-
-    # setup embeddings for bi encoder
-    # embedder = BiEncoderPageEmbedder(model_name, engine, device, data_dir, _last_token_pool_embed)
- 
-    # setup embeddings for col embedder
-    embedder = Qwen3_5ColPageEmbedder(model_name, engine, device, data_dir)
-
+    embedder = build_embedder(args.model, engine, device, data_dir)
     setup.setup_page_embeddings(embedder)
 
 
