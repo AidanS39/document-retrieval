@@ -28,6 +28,7 @@ dependencies = [
   "psycopg[binary]>=3.3.4",
   "pymupdf>=1.27.2.3",
   "python-docx>=1.2.0",
+  "fastapi[standard]>=0.115.0",
   "python-dotenv>=1.2.2",
   "python-pptx>=1.0.2",
   "scikit-learn>=1.9.0",
@@ -36,6 +37,7 @@ dependencies = [
   "torch>=2.11.0",
   "torchvision>=0.26.0",
   "transformers>=5.3.0",
+  "qwen-vl-utils>=0.0.14",
 ]
 
 [dependency-groups]

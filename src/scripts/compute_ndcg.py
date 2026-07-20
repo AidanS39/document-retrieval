@@ -16,18 +16,20 @@ DB_DATABASE = os.getenv("DB_DATABASE")
 
 
 def main():
+    eval_dir = Path(os.getenv("DATA_DIR", "/app/data")) / "evaluation"
+
     parser = argparse.ArgumentParser(description="Compute NDCG metrics from pooled annotations")
     parser.add_argument(
         "--pool",
-        required=True,
         type=Path,
-        help="Path to query_pool.json",
+        default=eval_dir / "query_pool.json",
+        help="Path to query_pool.json (default: $DATA_DIR/evaluation/query_pool.json)",
     )
     parser.add_argument(
         "--systems-dir",
-        required=True,
         type=Path,
-        help="Directory containing system_{id}.json files",
+        default=eval_dir / "systems",
+        help="Directory containing system_{id}.json files (default: $DATA_DIR/evaluation/systems)",
     )
     parser.add_argument(
         "--k",
@@ -43,9 +45,9 @@ def main():
     )
     parser.add_argument(
         "--out",
-        required=True,
         type=Path,
-        help="Output directory for ndcg_results_{timestamp}.json",
+        default=eval_dir / "results",
+        help="Output directory for ndcg_results_{timestamp}.json (default: $DATA_DIR/evaluation/results)",
     )
     args = parser.parse_args()
 

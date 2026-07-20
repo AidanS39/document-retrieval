@@ -1,15 +1,11 @@
 import pytest
 import torch
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 from document_retrieval.embedding import (
-    BiEncoderPageEmbedder,
-    ColPageEmbedder,
     NemotronColPageEmbedder,
-    WebAIColPageEmbedder, TomoroAIColPageEmbedder, Qwen3_5ColPageEmbedder,
+    TransformersBasedPageEmbedder,
+    WebAIColPageEmbedder, TomoroAIColPageEmbedder, Qwen3_5ColPageEmbedder, Qwen3VLBiEncoderPageEmbedder, JinaV4BiEncoderPageEmbedder,
 )
-from document_retrieval.models import Page
 
 WEBAI_MODELS = [
     "webAI-Official/webAI-ColVec1-4b",
@@ -18,7 +14,7 @@ WEBAI_MODELS = [
 
 TOMOROAI_MODELS = [
     "TomoroAI/tomoro-colqwen3-embed-4b",
-    "TomoroAI/tomoro-colqwen3-embed-8b",
+    "TomoroAI/tomoro-colqwen3-embed-8b"
 ]
 
 QWEN3_5_MODELS = [
@@ -27,11 +23,16 @@ QWEN3_5_MODELS = [
 ]
 
 NEMOTRON_MODELS = [
-    "nvidia/llama-nemotron-colembed-vl-3b-v2",
+    "nvidia/llama-nemotron-colembed-vl-3b-v2"
 ]
 
-BI_ENCODER_MODELS = [
+QWEN3VL_MODELS = [
     "Qwen/Qwen3-VL-Embedding-2B",
+    "Qwen/Qwen3-VL-Embedding-8B"
+]
+
+JINAV4_MODELS = [
+    "jinaai/jina-embeddings-v4"
 ]
 
 
@@ -41,9 +42,9 @@ class EmbeddingTests:
     """
 
     @staticmethod
-    def test_col_embed_pages(embedder: ColPageEmbedder, page_ids: list[int]) -> None:
+    def test_embed_pages(embedder: TransformersBasedPageEmbedder, page_ids: list[int]) -> None:
         """
-        Test embed_pages for any ColPageEmbedder subclass.
+        Test embed_pages for any TransformersBasedPageEmbedder subclass.
 
         Verifies:
         - New BatchMetadata entries are added to embedder.metadata
@@ -97,65 +98,44 @@ class EmbeddingTests:
             embedder.metadata.telemetry.total_embedding_time = initial_total_time
             embedder.metadata.save()
 
-    @staticmethod
-    def test_bi_encoder_embed_pages(
-        embedder: BiEncoderPageEmbedder, engine, page_ids: list[int]
-    ) -> None:
-        """
-        Test embed_pages for any BiEncoderPageEmbedder subclass.
-
-        Verifies:
-        - Each page in page_ids has a non-null embedding written to the DB
-        """
-        embedder.embed_pages(page_ids)
-
-        with Session(engine) as session:
-            stmt = select(Page.id, Page.embedding).where(Page.id.in_(page_ids))
-            results = session.execute(stmt).all()
-
-        result_map = {page_id: embedding for page_id, embedding in results}
-
-        for page_id in page_ids:
-            assert page_id in result_map, (
-                f"Page {page_id} not found in DB after embed_pages"
-            )
-            assert result_map[page_id] is not None, (
-                f"Page {page_id} has no embedding in DB after embed_pages"
-            )
-
 
 @pytest.mark.integration
 @pytest.mark.parametrize("model_name", WEBAI_MODELS)
 def test_webai_embed_pages(model_name: str, device, engine, data_dir, page_ids):
     embedder = WebAIColPageEmbedder(model_name, engine, device, data_dir)
-    EmbeddingTests.test_col_embed_pages(embedder, page_ids)
+    EmbeddingTests.test_embed_pages(embedder, page_ids)
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("model_name", TOMOROAI_MODELS)
 def test_tomoroai_embed_pages(model_name: str, device, engine, data_dir, page_ids):
     embedder = TomoroAIColPageEmbedder(model_name, engine, device, data_dir)
-    EmbeddingTests.test_col_embed_pages(embedder, page_ids)
+    EmbeddingTests.test_embed_pages(embedder, page_ids)
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("model_name", QWEN3_5_MODELS)
 def test_qwen3_5_embed_pages(model_name: str, device, engine, data_dir, page_ids):
     embedder = Qwen3_5ColPageEmbedder(model_name, engine, device, data_dir)
-    EmbeddingTests.test_col_embed_pages(embedder, page_ids)
+    EmbeddingTests.test_embed_pages(embedder, page_ids)
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("model_name", NEMOTRON_MODELS)
 def test_nemotron_embed_pages(model_name: str, device, engine, data_dir, page_ids):
     embedder = NemotronColPageEmbedder(model_name, engine, device, data_dir)
-    EmbeddingTests.test_col_embed_pages(embedder, page_ids)
+    EmbeddingTests.test_embed_pages(embedder, page_ids)
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("model_name", BI_ENCODER_MODELS)
-def test_bi_encoder(model_name: str, device, engine, data_dir, page_ids):
-    embedder = BiEncoderPageEmbedder(
-        model_name, engine, device, data_dir, embed_func=None
-    )
-    EmbeddingTests.test_bi_encoder_embed_pages(embedder, engine, page_ids)
+@pytest.mark.parametrize("model_name", JINAV4_MODELS)
+def test_jinav4_embed_pages(model_name: str, device, engine, data_dir, page_ids):
+    embedder = JinaV4BiEncoderPageEmbedder(model_name, engine, device, data_dir)
+    EmbeddingTests.test_embed_pages(embedder, page_ids)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("model_name", QWEN3VL_MODELS)
+def test_qwen3vl_embed_pages(model_name: str, device, engine, data_dir, page_ids):
+    embedder = Qwen3VLBiEncoderPageEmbedder(model_name, engine, device, data_dir)
+    EmbeddingTests.test_embed_pages(embedder, page_ids)

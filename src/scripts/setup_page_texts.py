@@ -1,11 +1,8 @@
 import argparse
-from document_retrieval.utils import get_device
 import os
 from dotenv import load_dotenv
-from pathlib import Path
 from sqlalchemy.engine import URL, create_engine
-from scripts.config import add_device_arg, add_index_arg, build_indexer
-from document_retrieval.setup import IndexingSetup
+from document_retrieval.preprocessing import extract_page_texts
 
 load_dotenv()
 
@@ -18,14 +15,9 @@ DB_DATABASE = os.getenv("DB_DATABASE")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Build a page index")
-    add_device_arg(parser)
-    add_index_arg(parser)
+    parser = argparse.ArgumentParser(description="Extract text from pages and store in the database")
+    parser.add_argument("--workers", type=int, default=4, help="Number of parallel worker processes (default: 4)")
     args = parser.parse_args()
-
-    data_dir = Path(os.getenv("DATA_DIR", "/app/data"))
-
-    device = get_device(args.device)
 
     conn_url = URL.create(
         drivername=DB_DRIVER,
@@ -37,10 +29,7 @@ def main():
     )
     engine = create_engine(conn_url)
 
-    setup = IndexingSetup(engine, data_dir)
-
-    indexer = build_indexer(args.model, device, data_dir, engine=engine, low_memory=True)
-    setup.setup_page_index(indexer)
+    extract_page_texts(engine, max_workers=args.workers)
 
 
 if __name__ == "__main__":

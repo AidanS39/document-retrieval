@@ -25,3 +25,4 @@ mutagen.yml.lock
 nstx_embeddings.csv
 nstx_papers.csv
 nstx_embeddings.*
+nstx_data/**

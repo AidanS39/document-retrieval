@@ -1,5 +1,3 @@
-import gc
-import torch
 from abc import ABC, abstractmethod
 import bm25s
 from sklearn.metrics.pairwise import cosine_similarity
@@ -12,14 +10,12 @@ from pathlib import Path
 from .models import (
     Document, 
     Page, 
-    NSTXPaper, 
     NSTXEmbedding
 )
 from .embedding import (
     TfIdfDocEmbedder,
     BM25DocEmbedder,
-    BiEncoderPageEmbedder,
-    ColPageEmbedder, GeminiBiEncoderPageEmbedder
+    GeminiBiEncoderPageEmbedder
 )
 from .indexing import Indexer
 from .utils import timefunction, print_gpu_stats
@@ -193,10 +189,18 @@ class DocRanker(ABC):
         pass
 
 
-class PageRanker(ABC):
-    @abstractmethod
+class PageRanker:
+    def __init__(self, embedder, indexer: Indexer, engine: Engine):
+        self.embedder = embedder
+        self.indexer = indexer
+        self.engine = engine
+
+    @timefunction
     def rank(self, queries: list[str], top_k: int = 100) -> list[PageRanking]:
-        pass
+        print_gpu_stats()
+        query_embeddings = self.embedder.embed_queries(queries)
+        scores = self.indexer.retrieve(query_embeddings, top_k)
+        return [PageRanking.from_tuples(queries[i], scores[i], self.engine) for i in range(len(queries))]
 
 
 class TfIdfDocRanker(DocRanker):
@@ -269,45 +273,7 @@ class BM25DocRanker(DocRanker):
         return rankings
 
 
-class BiEncoderPageRanker(PageRanker):
-    def __init__(
-        self,
-        embedder: BiEncoderPageEmbedder,
-        engine,
-        data_dir: Path,
-    ):
-        self.engine = engine
-        self.embedder = embedder
-        self.data_dir = data_dir
-
-    @timefunction
-    def rank(self, queries: list[str], top_k: int = 100) -> list[PageRanking]:
-        query_embeddings = self.embedder.embed_queries(queries)
-
-        query_results = []
-        with Session(self.engine) as session:
-            for query_embedding in query_embeddings:
-                vec = query_embedding
-                rows = session.execute(
-                    select(
-                        Page.id,
-                        (1 - Page.embedding.cosine_distance(vec)).label("score"),
-                    )
-                    .where(Page.embedding.isnot(None))
-                    .order_by(Page.embedding.cosine_distance(vec))
-                    .limit(top_k)
-                ).all()
-                query_results.append(rows)
-
-        rankings = []
-        for query, rows in zip(queries, query_results):
-            score_tuples = [(page_id, score) for page_id, score in rows]
-            rankings.append(PageRanking.from_tuples(query, score_tuples, self.engine))
-
-        return rankings
-
-
-class NSTXViewBiEncoderPageRanker(BiEncoderPageRanker):
+class NSTXViewBiEncoderPageRanker:
     def __init__(
         self,
         embedder: GeminiBiEncoderPageEmbedder,
@@ -344,28 +310,6 @@ class NSTXViewBiEncoderPageRanker(BiEncoderPageRanker):
         for query, rows in zip(queries, query_results):
             score_tuples = [(page_id, score) for page_id, score in rows]
             rankings.append(NSTXViewPaperRanking.from_tuples(query, score_tuples, self.engine))
-
-        return rankings
-
-
-class ColPageRanker(PageRanker):
-    def __init__(self, embedder: ColPageEmbedder, indexer: Indexer, engine: Engine):
-        self.embedder = embedder
-        self.indexer = indexer
-        self.engine = engine
-
-    @timefunction
-    def rank(self, queries: list[str], top_k: int = 100) -> list[PageRanking]:
-        print_gpu_stats()
-        query_embeddings = self.embedder.embed_queries(queries)
-
-        print(f"query embedding shape: {query_embeddings.shape}")
-
-        scores = self.indexer.retrieve(query_embeddings, top_k)
-
-        rankings = list()
-        for i in range(len(queries)):
-            rankings.append(PageRanking.from_tuples(queries[i], scores[i], self.engine))
 
         return rankings
 

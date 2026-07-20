@@ -8,7 +8,7 @@ from pptx import Presentation
 from pptx.shapes.autoshape import Shape
 from PIL import Image
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert
 from .models import Document, Page
 
@@ -200,3 +200,90 @@ def convert_docs_to_images(
         print(f"Failed documents ({len(failed_docs)}): {failed_docs}")
 
     return len(all_pages)
+
+
+def _extract_page_text(pdf_page: pymupdf.Page) -> str:
+    """Extract all text from a PDF page, including text embedded in raster images via OCR.
+
+    Uses get_textpage_ocr(full=False) so tesseract OCRs embedded images while the
+    normal text layer is parsed directly. Falls back to plain get_text() if tesseract
+    is not available.
+    """
+    try:
+        textpage = pdf_page.get_textpage_ocr(flags=0, dpi=150, full=False)
+        return pdf_page.get_text(textpage=textpage).strip()
+    except Exception:
+        return pdf_page.get_text().strip()
+
+
+def _extract_texts_for_doc(
+    doc_id: int, doc_path_str: str, page_numbers: list[int]
+) -> list[dict]:
+    """Extract per-page text for one document. Returns list of dicts with id-keyed updates."""
+    doc_path = Path(doc_path_str)
+    results = []
+
+    try:
+        with pymupdf.open(doc_path) as pdf:
+            for page_id, page_number in page_numbers:
+                try:
+                    pdf_page = pdf[page_number - 1]
+                    text = _extract_page_text(pdf_page)
+                    results.append({"id": page_id, "text": text, "text_failed": False})
+                except Exception as e:
+                    print(f"WARNING: failed to extract text from page {page_number} of {doc_path.name}: {e}")
+                    results.append({"id": page_id, "text": None, "text_failed": True})
+    except Exception as e:
+        print(f"ERROR: could not open {doc_path}: {e}")
+        for page_id, _ in page_numbers:
+            results.append({"id": page_id, "text": None, "text_failed": True})
+
+    return results
+
+
+def extract_page_texts(engine, max_workers: int = 4):
+    """Extract text for all pages that do not yet have text, writing results to the DB."""
+    max_workers = min(os.cpu_count() or 4, max_workers)
+
+    with Session(engine) as session:
+        rows = session.execute(
+            select(Page.id, Page.number, Document.id, Document.path)
+            .join(Document, Page.document_id == Document.id)
+            .where(Page.text.is_(None), Page.text_failed.is_(False))
+        ).all()
+
+    if not rows:
+        print("No pages require text extraction.")
+        return 0
+
+    # Group pages by document
+    doc_pages: dict[tuple[int, str], list[tuple[int, int]]] = {}
+    for page_id, page_number, doc_id, doc_path in rows:
+        key = (doc_id, doc_path)
+        doc_pages.setdefault(key, []).append((page_id, page_number))
+
+    print(f"Extracting text for {len(rows)} pages across {len(doc_pages)} documents.")
+
+    all_updates: list[dict] = []
+
+    with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+        future_to_doc = {
+            executor.submit(_extract_texts_for_doc, doc_id, doc_path, pages): (doc_id, doc_path)
+            for (doc_id, doc_path), pages in doc_pages.items()
+        }
+        for future in concurrent.futures.as_completed(future_to_doc):
+            doc_id, doc_path = future_to_doc[future]
+            try:
+                all_updates.extend(future.result())
+            except Exception as e:
+                print(f"ERROR: unexpected failure for document {doc_path}: {e}")
+
+    if all_updates:
+        with Session(engine) as session:
+            session.execute(update(Page), all_updates)
+            session.commit()
+
+    succeeded = sum(1 for u in all_updates if not u["text_failed"])
+    failed = len(all_updates) - succeeded
+    print(f"Done: {succeeded} pages extracted, {failed} failed.")
+    return succeeded

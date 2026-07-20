@@ -174,9 +174,9 @@ class AnnotationStore:
 
     def get_all_annotators(self) -> list[str]:
         with Session(self.engine) as session:
-            return session.execute(
+            return list(session.execute(
                 select(EvaluationAnnotation.annotator).distinct()
-            ).scalars().all()
+            ).scalars().all())
 
     def is_complete(self, pool: QueryPool, annotator: str) -> bool:
         for q in pool.queries:

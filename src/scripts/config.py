@@ -1,16 +1,21 @@
+from sqlalchemy import Engine
 import argparse
 from pathlib import Path
 from document_retrieval.embedding import (
-    BiEncoderPageEmbedder,
     NemotronColPageEmbedder,
     WebAIColPageEmbedder,
     TomoroAIColPageEmbedder,
     Qwen3_5ColPageEmbedder,
+    Qwen3VLBiEncoderPageEmbedder,
+    JinaV4BiEncoderPageEmbedder,
     _last_token_pool_embed,
 )
-from document_retrieval.indexing import FastPlaidIndexer, PGVectorIndexer
+from document_retrieval.indexing import FastPlaidIndexer, PGVectorIndexer, Qwen3VL2BIndexer, Qwen3VL8BIndexer
+from document_retrieval.ranking import PageRanker
+from document_retrieval.evaluation import RetrievalSystem
 
 DEFAULT_MODEL = "vultr/VultronRetrieverCore-Qwen3.5-4.5B"
+DEFAULT_INDEX = "Qwen/Qwen3-VL-Embedding-2B"
 
 MODEL_REGISTRY = {
     "vultr/VultronRetrieverCore-Qwen3.5-4.5B": Qwen3_5ColPageEmbedder,
@@ -20,7 +25,10 @@ MODEL_REGISTRY = {
     "TomoroAI/tomoro-colqwen3-embed-4b": TomoroAIColPageEmbedder,
     "TomoroAI/tomoro-colqwen3-embed-8b": TomoroAIColPageEmbedder,
     "nvidia/llama-nemotron-colembed-vl-3b-v2": NemotronColPageEmbedder,
-    "Qwen/Qwen3-VL-Embedding-2B": BiEncoderPageEmbedder,
+    "Qwen/Qwen3-VL-Embedding-2B": Qwen3VLBiEncoderPageEmbedder,
+    "Qwen/Qwen3-VL-Embedding-8B": Qwen3VLBiEncoderPageEmbedder,
+    "jinaai/jina-embeddings-v4": JinaV4BiEncoderPageEmbedder
+    
 }
 
 INDEX_REGISTRY = {
@@ -31,7 +39,21 @@ INDEX_REGISTRY = {
     "TomoroAI/tomoro-colqwen3-embed-4b": FastPlaidIndexer,
     "TomoroAI/tomoro-colqwen3-embed-8b": FastPlaidIndexer,
     "nvidia/llama-nemotron-colembed-vl-3b-v2": FastPlaidIndexer,
-    "Qwen/Qwen3-VL-Embedding-2B": PGVectorIndexer,
+    "Qwen/Qwen3-VL-Embedding-2B": Qwen3VL2BIndexer,
+    "Qwen/Qwen3-VL-Embedding-8B": Qwen3VL8BIndexer,
+    "jinaai/jina-embeddings-v4": PGVectorIndexer
+}
+
+RETRIEVAL_SYSTEMS: dict[int, RetrievalSystem] = {
+    1: RetrievalSystem(1, "Nemotron ColEmbed 3B + FastPlaid",       "nvidia/llama-nemotron-colembed-vl-3b-v2", "col",        "fast_plaid", top_k=10),
+    2: RetrievalSystem(2, "WebAI ColVec1 9B + FastPlaid",           "webAI-Official/webAI-ColVec1-9b",         "col",        "fast_plaid", top_k=10),
+    3: RetrievalSystem(3, "WebAI ColVec1 4B + FastPlaid",           "webAI-Official/webAI-ColVec1-4b",         "col",        "fast_plaid", top_k=10),
+    4: RetrievalSystem(4, "Qwen3 VL Embedding 2B + pgvector",       "Qwen/Qwen3-VL-Embedding-2B",              "bi_encoder", "pgvector",   top_k=10),
+    5: RetrievalSystem(5, "Vultron Qwen3.5 4.5B + FastPlaid",       "vultr/VultronRetrieverCore-Qwen3.5-4.5B", "col",        "fast_plaid", top_k=10),
+    6: RetrievalSystem(6, "ColQwen3.5 4.5B v3 + FastPlaid",         "athrael-soju/colqwen3.5-4.5B-v3",         "col",        "fast_plaid", top_k=10),
+    7: RetrievalSystem(7, "TomoroAI ColQwen3 4B + FastPlaid",       "TomoroAI/tomoro-colqwen3-embed-4b",       "col",        "fast_plaid", top_k=10),
+    8: RetrievalSystem(8, "TomoroAI ColQwen3 8B + FastPlaid",       "TomoroAI/tomoro-colqwen3-embed-8b",       "col",        "fast_plaid", top_k=10),
+    9: RetrievalSystem(9, "Jina V4 Embedding 2B + pgvector",        "jinaai/jina-embeddings-v4",               "bi_encoder", "pgvector",   top_k=10),
 }
 
 
@@ -39,21 +61,34 @@ def build_indexer(
     model_name: str,
     device,
     data_dir: Path,
-    engine=None,
-    embedding_column: str = "embedding",
-    low_memory: bool = False,
+    **kwargs,
 ):
-    cls = INDEX_REGISTRY[model_name]
-    if cls is PGVectorIndexer and embedding_column:
-        return cls(model_name, device, data_dir, engine, embedding_column)
-    return cls(model_name, device, data_dir, low_memory=low_memory)
+    try:
+        cls = INDEX_REGISTRY[model_name]
+    except KeyError:
+        raise Exception("Index doesn't exist in registry.")
 
+    try:
+        if cls is FastPlaidIndexer:
+            return FastPlaidIndexer(model_name, device, data_dir, kwargs["low_memory"])
+        elif issubclass(cls, PGVectorIndexer) and cls is not PGVectorIndexer:
+            return cls(model_name, device, data_dir, kwargs["engine"])
+        elif cls is PGVectorIndexer:
+            return cls(model_name, device, data_dir, kwargs["engine"], kwargs["embedding_column"])
+    except KeyError as e:
+        raise Exception(f"Missing arguments for indexer {e}")
 
 def build_embedder(model_name: str, engine, device, data_dir: Path):
     cls = MODEL_REGISTRY[model_name]
-    if cls is BiEncoderPageEmbedder:
-        return cls(model_name, engine, device, data_dir, _last_token_pool_embed)
     return cls(model_name, engine, device, data_dir)
+
+
+def build_ranker(system_id: int, engine, device, data_dir: Path):
+    system = RETRIEVAL_SYSTEMS[system_id]
+    embedder = build_embedder(system.embed_model, engine, device, data_dir)
+    indexer = build_indexer(system.embed_model, device, data_dir, engine=engine, low_memory=True)
+    return PageRanker(embedder, indexer, engine)
+
 
 def add_embedder_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
@@ -62,6 +97,15 @@ def add_embedder_arg(parser: argparse.ArgumentParser) -> None:
         default=DEFAULT_MODEL,
         metavar="MODEL",
         help=f"Model to embed with. Choices: {', '.join(MODEL_REGISTRY.keys())} (default: {DEFAULT_MODEL})",
+    )
+
+def add_index_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--model",
+        choices=list(INDEX_REGISTRY.keys()),
+        default=DEFAULT_INDEX,
+        metavar="MODEL",
+        help=f"Index to build. Choices: {', '.join(INDEX_REGISTRY.keys())} (default: {DEFAULT_INDEX})",
     )
 
 def add_device_arg(parser: argparse.ArgumentParser) -> None:

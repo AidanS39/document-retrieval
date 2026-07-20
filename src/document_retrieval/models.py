@@ -39,7 +39,10 @@ class Page(Base):
     document: Mapped["Document"] = relationship(back_populates="pages")
     image_path: Mapped[str] = mapped_column(unique=True)
     number: Mapped[int]
+    text: Mapped[Optional[str]]
+    text_failed: Mapped[bool] = mapped_column(default=False)
     qwen3_2b_embedding: Mapped[Optional[HALFVEC]] = mapped_column(HALFVEC(2048))
+    qwen3_8b_embedding: Mapped[Optional[HALFVEC]] = mapped_column(HALFVEC(4096))
     gemini_embedding: Mapped[Optional[VECTOR]] = mapped_column(VECTOR(1536))
     __table_args__ = (
         Index(

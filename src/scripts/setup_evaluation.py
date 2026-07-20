@@ -2,31 +2,33 @@ import argparse
 import json
 import os
 from pathlib import Path
-
+from document_retrieval.evaluation import QueryPool, RetrievalSystem
 from dotenv import load_dotenv
 
 load_dotenv()
 
 
 def main():
+    eval_dir = Path(os.getenv("DATA_DIR", "/app/data")) / "evaluation"
+
     parser = argparse.ArgumentParser(description="Build query pool from retrieval system rankings")
     parser.add_argument(
         "--queries-file",
-        required=True,
         type=Path,
-        help="JSON file containing a list of query strings",
+        default=eval_dir / "queries.json",
+        help="JSON file containing a list of query strings (default: $DATA_DIR/evaluation/queries.json)",
     )
     parser.add_argument(
         "--systems-dir",
-        required=True,
         type=Path,
-        help="Directory containing system_{id}.json files",
+        default=eval_dir / "systems",
+        help="Directory containing system_{id}.json files (default: $DATA_DIR/evaluation/systems)",
     )
     parser.add_argument(
         "--pool-out",
-        required=True,
         type=Path,
-        help="Output path for query_pool.json",
+        default=eval_dir / "query_pool.json",
+        help="Output path for query_pool.json (default: $DATA_DIR/evaluation/query_pool.json)",
     )
     parser.add_argument(
         "--top-k",
@@ -36,7 +38,6 @@ def main():
     )
     args = parser.parse_args()
 
-    from document_retrieval.evaluation import QueryPool, RetrievalSystem
 
     with open(args.queries_file) as f:
         queries = json.load(f)
@@ -62,7 +63,7 @@ def main():
     avg_pooled = total_pooled / len(pool.queries) if pool.queries else 0
     print(f"Average pooled pages per query: {avg_pooled:.1f}")
     for q in pool.queries:
-        print(f"  [{q['id']}] {q['query'][:70]!r}: {len(q['pooled_page_ids'])} pages")
+        print(f"  [{q['id']}] {q['query']!r}: {len(q['pooled_page_ids'])} pages")
 
 
 if __name__ == "__main__":

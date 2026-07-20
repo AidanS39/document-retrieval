@@ -94,7 +94,6 @@ class TfIdfDocEmbedder(DocEmbedder):
         query_embeddings = self.vectorizer.transform(queries)
         return query_embeddings
 
-
 class BM25DocEmbedder(DocEmbedder):
     def __init__(self, engine: Engine):
         super().__init__(engine)
@@ -153,10 +152,7 @@ class TransformersBasedPageEmbedder(PageEmbedder):
     def _embedding_pipeline(self, images: list[Image]):
         pass
 
-    @abstractmethod
-    def _postprocess_batch(self, embeddings, page_ids: list[int]):
-        pass
-
+    @timefunction
     def embed_pages(self, page_ids: list[int], batch_size: int = 64):
         i = 0
         while i < len(page_ids):
@@ -181,8 +177,6 @@ class TransformersBasedPageEmbedder(PageEmbedder):
                     "embeddings": embeddings,
                     "page_ids": successful_ids
                 }, self.metadata.embeddings_path / f"batch_{batch_metadata.id}.pt")
-
-                self._postprocess_batch(embeddings, successful_ids)
 
             i += batch_size
 
@@ -238,18 +232,15 @@ class TransformersBasedPageEmbedder(PageEmbedder):
     def embed_queries(self, queries: list[str]):
         pass
 
-
-class BiEncoderPageEmbedder(TransformersBasedPageEmbedder):
+class Qwen3VLBiEncoderPageEmbedder(TransformersBasedPageEmbedder):
     def __init__(
         self,
         model_name: str,
         engine: Engine,
         device: torch.device,
         data_dir: Path,
-        embed_func,
     ):
         super().__init__(model_name, engine, device, data_dir)
-        self.embed_func = embed_func or _mean_pool_embed
 
     def _process_batch(self, images: list[Image]):
         messages = [
@@ -279,9 +270,8 @@ class BiEncoderPageEmbedder(TransformersBasedPageEmbedder):
 
     @timefunction
     def _embed_batch(self, inputs):
-
         with torch.inference_mode():
-            embeddings = self.embed_func(self.model, inputs)
+            embeddings = _last_token_pool_embed(self.model, inputs)
 
         return embeddings
 
@@ -290,18 +280,6 @@ class BiEncoderPageEmbedder(TransformersBasedPageEmbedder):
         inputs = self._process_batch(images)
         embeddings = self._embed_batch(inputs)
         return embeddings
-
-    def _postprocess_batch(self, embeddings, page_ids: list[int]):
-        # embeddings = embeddings.to("cpu").tolist()
-        # updated_pages = [
-        #     {"id": id, "embedding": embedding}
-        #     for id, embedding in zip(page_ids, embeddings)
-        # ]
-        #
-        # with Session(self.engine) as session:
-        #     session.execute(update(Page), updated_pages)
-        #     session.commit()
-        pass
 
     @timefunction
     def embed_queries(self, queries: list[str]):
@@ -330,40 +308,35 @@ class BiEncoderPageEmbedder(TransformersBasedPageEmbedder):
         )
 
         with torch.inference_mode():
-            embeddings = self.embed_func(self.model, inputs).to("cpu").tolist()
+            embeddings = _last_token_pool_embed(self.model, inputs).to("cpu").tolist()
         return embeddings
 
-class GeminiBiEncoderPageEmbedder(BiEncoderPageEmbedder):
+class JinaV4BiEncoderPageEmbedder(TransformersBasedPageEmbedder):
+    @timefunction
+    def _embedding_pipeline(self, images: list[Image]):
+        embeddings = self.model.encode_image(
+            images=images,
+            task="retrieval"
+        )
+        return embeddings
+
+    def embed_queries(self, queries: list[str]):
+        embeddings = self.model.encode_text(
+            texts=queries,
+            task="retrieval",
+            prompt_name="query"
+        )
+
+        return embeddings
+
+class GeminiBiEncoderPageEmbedder(TransformersBasedPageEmbedder):
     def _embedding_pipeline(self, images: list[Image]):
         pass
 
     def embed_queries(self, queries: list[str]):
         pass
 
-
-class ColPageEmbedder(TransformersBasedPageEmbedder):
-    def __init__(
-        self,
-        model_name,
-        engine: Engine,
-        device: torch.device,
-        data_dir: Path,
-    ):
-        super().__init__(model_name, engine, device, data_dir)
-
-    @abstractmethod
-    def _embedding_pipeline(self, images: list[Image]) -> torch.Tensor:
-        pass
-
-    def _postprocess_batch(self, embeddings, page_ids):
-        pass
-
-    @abstractmethod
-    def embed_queries(self, queries: list[str]):
-        pass
-
-
-class NemotronColPageEmbedder(ColPageEmbedder):
+class NemotronColPageEmbedder(TransformersBasedPageEmbedder):
     @timefunction
     def _embedding_pipeline(self, images: list[Image]) -> torch.Tensor:
         embeddings = self.model.forward_images(images, batch_size=64)
@@ -375,7 +348,7 @@ class NemotronColPageEmbedder(ColPageEmbedder):
         return embeddings
 
 
-class WebAIColPageEmbedder(ColPageEmbedder):
+class WebAIColPageEmbedder(TransformersBasedPageEmbedder):
     def _process_batch(self, images: list[Image]):
         inputs = self.processor.process_images(images=images)
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
@@ -403,7 +376,7 @@ class WebAIColPageEmbedder(ColPageEmbedder):
         return embeddings
 
 
-class TomoroAIColPageEmbedder(ColPageEmbedder):
+class TomoroAIColPageEmbedder(TransformersBasedPageEmbedder):
     def _process_batch(self, images: list[Image]):
         inputs = self.processor.process_images(images=images)
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
@@ -430,7 +403,7 @@ class TomoroAIColPageEmbedder(ColPageEmbedder):
         embeddings = embeddings.to(torch.float16)
         return embeddings
 
-class Qwen3_5ColPageEmbedder(ColPageEmbedder):
+class Qwen3_5ColPageEmbedder(TransformersBasedPageEmbedder):
 
     @staticmethod
     def get_model_and_processor(

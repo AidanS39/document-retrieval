@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from .preprocessing import find_docs
 from .preprocessing import convert_docs_to_texts
 from .preprocessing import convert_docs_to_images
+from .preprocessing import extract_page_texts
 from .utils import sanitize_strings, sanitize_string
 from .utils import timefunction
 from .utils import mark_db_as_initialized, mark_db_as_seeded
@@ -92,6 +93,7 @@ class DatabaseSetup:
             session.commit()
 
         convert_docs_to_images(self.engine, self.data_dir)
+        extract_page_texts(self.engine)
 
         mark_db_as_seeded(self.data_dir)
 

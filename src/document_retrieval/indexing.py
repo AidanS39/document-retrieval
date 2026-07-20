@@ -8,7 +8,7 @@ from pathlib import Path
 from sqlalchemy import delete, Engine, update, select
 from pgvector.sqlalchemy import HALFVEC
 from sqlalchemy.orm import Session
-from .utils import timefunction, gpu_stats, print_gpu_stats
+from .utils import timefunction, gpu_stats
 from .models import Page
 
 
@@ -38,8 +38,8 @@ class PGVectorIndexer(Indexer):
         super().__init__(index_name, device, data_dir)
         self.engine = engine
         self.embedding_column = embedding_column
-        col_type = Page.__table__.c[embedding_column].type
-        self._half_precision = isinstance(col_type, HALFVEC)
+        column_type = Page.__table__.c[embedding_column].type
+        self._half_precision = isinstance(column_type, HALFVEC)
     
     @timefunction
     def _index_batch(
@@ -105,6 +105,25 @@ class PGVectorIndexer(Indexer):
                 query_results.append(rows)
         return query_results
 
+class Qwen3VL2BIndexer(PGVectorIndexer):
+    def __init__(
+        self,
+        index_name,
+        device: torch.device,
+        data_dir: Path,
+        engine: Engine
+    ):
+        super().__init__(index_name, device, data_dir, engine, "qwen3_2b_embedding")
+
+class Qwen3VL8BIndexer(PGVectorIndexer):
+    def __init__(
+        self,
+        index_name,
+        device: torch.device,
+        data_dir: Path,
+        engine: Engine
+    ):
+        super().__init__(index_name, device, data_dir, engine, "qwen3_8b_embedding")
 
 class FastPlaidIndexer(Indexer):
     def __init__(

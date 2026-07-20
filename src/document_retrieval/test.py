@@ -16,7 +16,7 @@ from .utils import get_device
 from .utils import timefunction
 from .embedding import WebAIColPageEmbedder
 from .indexing import FastPlaidIndexer
-from .ranking import BiEncoderPageRanker, ColPageRanker
+from .ranking import PageRanker
 from .ranking import TfIdfDocRanker, BM25DocRanker
 
 load_dotenv()
@@ -219,7 +219,7 @@ def main():
     # test_bm25(engine, queries)
     # test_bi_encoder(engine, queries, data_dir)
 
-    ranker = ColPageRanker(embedder, indexer, engine)
+    ranker = PageRanker(embedder, indexer, engine)
     test_col_rank(ranker, engine, queries, data_dir, device)
 
 
