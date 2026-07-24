@@ -1,5 +1,6 @@
 import argparse
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -49,6 +50,18 @@ def main():
         default=eval_dir / "results",
         help="Output directory for ndcg_results_{timestamp}.json (default: $DATA_DIR/evaluation/results)",
     )
+    parser.add_argument(
+        "--before",
+        type=datetime.fromisoformat,
+        default=None,
+        help="Only use annotations submitted before this timestamp (ISO 8601, e.g. 2024-06-01T12:00:00)",
+    )
+    parser.add_argument(
+        "--after",
+        type=datetime.fromisoformat,
+        default=None,
+        help="Only use annotations submitted after this timestamp (ISO 8601, e.g. 2024-06-01T12:00:00)",
+    )
     args = parser.parse_args()
 
     from document_retrieval.evaluation import AnnotationStore, NDCGComputer, QueryPool, RetrievalSystem
@@ -78,11 +91,20 @@ def main():
     print(f"Annotators in DB: {annotators if annotators else '(none)'}")
 
     computer = NDCGComputer(store)
-    results = computer.compute(pool, systems, k=args.k, aggregate=args.aggregate)
+    results = computer.compute(
+        pool, systems, k=args.k, aggregate=args.aggregate,
+        before=args.before, after=args.after,
+    )
     out_path = computer.export_results(results, args.out)
     print(f"\nResults written to {out_path}")
 
-    print(f"\nNDCG@{args.k} ({args.aggregate} aggregate)")
+    filter_parts = []
+    if args.after:
+        filter_parts.append(f"after {args.after.isoformat()}")
+    if args.before:
+        filter_parts.append(f"before {args.before.isoformat()}")
+    filter_str = f" [{', '.join(filter_parts)}]" if filter_parts else ""
+    print(f"\nNDCG@{args.k} ({args.aggregate} aggregate{filter_str})")
     print("-" * 55)
     sorted_systems = sorted(results["systems"], key=lambda s: s["mean_ndcg"], reverse=True)
     for s in sorted_systems:

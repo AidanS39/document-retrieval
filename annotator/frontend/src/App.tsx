@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Query, PageInfo, Score, Scores, QueryCompletion } from './types';
-import { fetchQueries, fetchPages, fetchAnnotations, fetchStatus, submitAnnotation, clearAnnotation } from './api';
+import { fetchQueries, fetchPages, fetchAnnotations, fetchStatus, submitAnnotation, clearAnnotation, fetchNote, submitNote } from './api';
 import Header from './components/Header';
 import LeftPanel from './components/LeftPanel';
 import PDFViewer from './components/PDFViewer';
@@ -10,6 +10,9 @@ export default function App() {
   const [annotator, setAnnotatorRaw] = useState<string>(
     () => localStorage.getItem('annotator') ?? ''
   );
+  const [showReg, setShowReg] = useState(() => !localStorage.getItem('annotator')?.trim());
+  const [regName, setRegName] = useState('');
+  const regInputRef = useRef<HTMLInputElement>(null);
   const [queries, setQueries] = useState<Query[]>([]);
   const [queryIndex, setQueryIndex] = useState(0);
   const [pages, setPages] = useState<PageInfo[]>([]);
@@ -18,11 +21,24 @@ export default function App() {
   const [queryCompletion, setQueryCompletion] = useState<QueryCompletion>({});
   const [loading, setLoading] = useState(true);
   const [poolMissing, setPoolMissing] = useState(false);
+  const [note, setNote] = useState('');
+  const noteSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const setAnnotator = (name: string) => {
     setAnnotatorRaw(name);
     localStorage.setItem('annotator', name);
   };
+
+  const submitReg = () => {
+    const name = regName.trim();
+    if (!name) return;
+    setAnnotator(name);
+    setShowReg(false);
+  };
+
+  useEffect(() => {
+    if (showReg) regInputRef.current?.focus();
+  }, [showReg]);
 
   // Load query list once on mount
   useEffect(() => {
@@ -59,6 +75,22 @@ export default function App() {
       }));
     });
   }, [currentQuery?.id, annotator]);
+
+  // Load note when query or annotator changes
+  useEffect(() => {
+    if (noteSaveTimer.current) { clearTimeout(noteSaveTimer.current); noteSaveTimer.current = null; }
+    if (!currentQuery || !annotator.trim()) { setNote(''); return; }
+    fetchNote(annotator, currentQuery.id).then(({ note: n }) => setNote(n));
+  }, [currentQuery?.id, annotator]);
+
+  const handleNoteChange = useCallback((text: string) => {
+    setNote(text);
+    if (!currentQuery || !annotator.trim()) return;
+    if (noteSaveTimer.current) clearTimeout(noteSaveTimer.current);
+    noteSaveTimer.current = setTimeout(() => {
+      submitNote(annotator, currentQuery.id, text);
+    }, 600);
+  }, [annotator, currentQuery]);
 
   const focusedPage = pages[focusedPageIdx] ?? null;
 
@@ -108,7 +140,8 @@ export default function App() {
   // Global keyboard handler
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement).tagName === 'INPUT') return;
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       if (e.key >= '0' && e.key <= '3') {
         const s = parseInt(e.key) as Score;
         if (focusedPage && scores[focusedPage.page_id] === s) clear(focusedPage.page_id);
@@ -144,6 +177,26 @@ export default function App() {
 
   return (
     <div className="app">
+      {showReg && (
+        <div className="reg-backdrop">
+          <div className="reg-modal">
+            <div className="reg-modal-title">Welcome to NSTX Annotator</div>
+            <p className="reg-modal-desc">Enter your name to begin annotating.</p>
+            <input
+              ref={regInputRef}
+              className="reg-input"
+              type="text"
+              placeholder="Your name"
+              value={regName}
+              onChange={e => setRegName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') submitReg(); }}
+            />
+            <button className="reg-submit-btn" onClick={submitReg} disabled={!regName.trim()}>
+              Start annotating
+            </button>
+          </div>
+        </div>
+      )}
       <Header
         annotator={annotator}
         onAnnotatorChange={setAnnotator}
@@ -171,6 +224,8 @@ export default function App() {
             submitAnnotation(annotator, currentQuery.id, pageId, s);
           }}
           onClear={clear}
+          note={note}
+          onNoteChange={handleNoteChange}
         />
         <PDFViewer
           pdfUrl={focusedPage?.pdf_url ?? null}

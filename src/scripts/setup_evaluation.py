@@ -36,8 +36,15 @@ def main():
         default=10,
         help="Top-k results per query per system to include in the pool (default: 10)",
     )
+    parser.add_argument(
+        "--systems",
+        type=int,
+        nargs="+",
+        metavar="ID",
+        default=None,
+        help="System IDs to include (e.g. --systems 1 4 12). Defaults to all available systems.",
+    )
     args = parser.parse_args()
-
 
     with open(args.queries_file) as f:
         queries = json.load(f)
@@ -49,7 +56,17 @@ def main():
     if not system_files:
         raise FileNotFoundError(f"No system_*.json files found in {args.systems_dir}")
 
-    systems = [RetrievalSystem.import_from_json(p) for p in system_files]
+    all_systems = [RetrievalSystem.import_from_json(p) for p in system_files]
+
+    if args.systems is not None:
+        available_ids = {s.id for s in all_systems}
+        unknown = set(args.systems) - available_ids
+        if unknown:
+            raise ValueError(f"Unknown system ID(s): {sorted(unknown)}. Available: {sorted(available_ids)}")
+        systems = [s for s in all_systems if s.id in set(args.systems)]
+    else:
+        systems = all_systems
+
     print(f"Loaded {len(systems)} system(s):")
     for s in systems:
         print(f"  [{s.id}] {s.name}")

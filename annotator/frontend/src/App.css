@@ -115,8 +115,11 @@ html, body, #root {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
-  width: 420px;
+  width: 500px;
   max-width: 90vw;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
 }
 
@@ -146,7 +149,70 @@ html, body, #root {
   padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 0;
+  overflow-y: auto;
+}
+
+.info-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 14px 0;
+}
+
+.info-section { display: flex; flex-direction: column; gap: 10px; }
+
+.info-section-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.info-section-text {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.6;
+}
+
+.info-steps {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.7;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.info-steps strong { color: var(--checkmark); }
+
+.info-shortcuts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 10px 12px;
+  background: var(--bg);
+  border-radius: 6px;
+}
+
+kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface2);
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--text);
+}
+
+.info-score-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .info-score-row {
@@ -213,12 +279,28 @@ html, body, #root {
   flex-shrink: 0;
 }
 
+.query-text-box--complete {
+  background: rgba(61, 255, 122, 0.3);
+}
+
+.query-text-box-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 5px;
+}
+
 .query-label {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-muted);
-  margin-bottom: 5px;
+}
+
+.query-progress-inline {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .query-text {
@@ -324,6 +406,47 @@ html, body, #root {
 
 .page-meta span {
   color: var(--text);
+}
+
+/* ── Missing pages note ─────────────────────────────── */
+
+.missing-pages-box {
+  padding: 10px 16px 12px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.missing-pages-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.missing-pages-textarea {
+  width: 100%;
+  height: 72px;
+  resize: none;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.missing-pages-textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.missing-pages-textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 /* ── PDF viewer ─────────────────────────────────────── */
@@ -449,3 +572,69 @@ html, body, #root {
 }
 
 .no-pool strong { color: var(--danger); }
+
+/* ── Registration modal ─────────────────────────────── */
+
+.reg-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.reg-modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: 360px;
+  max-width: 90vw;
+  padding: 28px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.reg-modal-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.reg-modal-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.reg-input {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  width: 100%;
+}
+
+.reg-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.reg-submit-btn {
+  padding: 9px 0;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.reg-submit-btn:hover:not(:disabled) { background: var(--accent-hover); }
+.reg-submit-btn:disabled { opacity: 0.4; cursor: default; }

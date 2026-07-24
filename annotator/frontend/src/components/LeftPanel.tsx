@@ -9,6 +9,8 @@ interface LeftPanelProps {
   onFocus: (idx: number) => void;
   onScore: (pageId: number, score: Score) => void;
   onClear: (pageId: number) => void;
+  note: string;
+  onNoteChange: (text: string) => void;
 }
 
 export default function LeftPanel({
@@ -19,11 +21,20 @@ export default function LeftPanel({
   onFocus,
   onScore,
   onClear,
+  note,
+  onNoteChange,
 }: LeftPanelProps) {
   return (
     <div className="left-panel">
-      <div className="query-text-box">
-        <div className="query-label">Query</div>
+      <div className={`query-text-box${pages.length > 0 && pages.every(p => scores[p.page_id] !== undefined) ? ' query-text-box--complete' : ''}`}>
+        <div className="query-text-box-header">
+          <div className="query-label">Query</div>
+          {pages.length > 0 && (
+            <div className="query-progress-inline">
+              {pages.filter(p => scores[p.page_id] !== undefined).length} / {pages.length} annotated
+            </div>
+          )}
+        </div>
         <div className="query-text">{query}</div>
       </div>
 
@@ -45,6 +56,16 @@ export default function LeftPanel({
             />
           ))
         )}
+      </div>
+
+      <div className="missing-pages-box">
+        <div className="missing-pages-label">Missing relevant pages</div>
+        <textarea
+          className="missing-pages-textarea"
+          placeholder="Note any pages you know are relevant but weren't included…"
+          value={note}
+          onChange={e => onNoteChange(e.target.value)}
+        />
       </div>
     </div>
   );

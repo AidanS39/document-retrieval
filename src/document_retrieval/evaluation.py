@@ -158,15 +158,23 @@ class AnnotationStore:
             session.execute(stmt)
             session.commit()
 
-    def get_annotations(self, query_id: int) -> dict[str, dict[int, int]]:
+    def get_annotations(
+        self,
+        query_id: int,
+        before: Optional[datetime] = None,
+        after: Optional[datetime] = None,
+    ) -> dict[str, dict[int, int]]:
+        stmt = select(
+            EvaluationAnnotation.annotator,
+            EvaluationAnnotation.page_id,
+            EvaluationAnnotation.score,
+        ).where(EvaluationAnnotation.query_id == query_id)
+        if before is not None:
+            stmt = stmt.where(EvaluationAnnotation.submitted_at < before)
+        if after is not None:
+            stmt = stmt.where(EvaluationAnnotation.submitted_at > after)
         with Session(self.engine) as session:
-            rows = session.execute(
-                select(
-                    EvaluationAnnotation.annotator,
-                    EvaluationAnnotation.page_id,
-                    EvaluationAnnotation.score,
-                ).where(EvaluationAnnotation.query_id == query_id)
-            ).all()
+            rows = session.execute(stmt).all()
         result: dict[str, dict[int, int]] = {}
         for annotator, page_id, score in rows:
             result.setdefault(annotator, {})[page_id] = score
@@ -195,8 +203,10 @@ class NDCGComputer:
         query_id: int,
         pooled_page_ids: list[int],
         aggregate: str = "mean",
+        before: Optional[datetime] = None,
+        after: Optional[datetime] = None,
     ) -> dict[int, float]:
-        annotations = self.store.get_annotations(query_id)
+        annotations = self.store.get_annotations(query_id, before=before, after=after)
         result: dict[int, float] = {}
         for page_id in pooled_page_ids:
             scores = [ann[page_id] for ann in annotations.values() if page_id in ann]
@@ -241,11 +251,15 @@ class NDCGComputer:
         systems: list[RetrievalSystem],
         k: int,
         aggregate: str = "mean",
+        before: Optional[datetime] = None,
+        after: Optional[datetime] = None,
     ) -> dict:
         results = {
             "computed_at": datetime.now(timezone.utc).isoformat(),
             "k": k,
             "score_aggregate": aggregate,
+            "annotation_before": before.isoformat() if before else None,
+            "annotation_after": after.isoformat() if after else None,
             "systems": [],
         }
         for system in systems:
@@ -253,7 +267,7 @@ class NDCGComputer:
             for q in pool.queries:
                 query_id = q["id"]
                 pooled = q["pooled_page_ids"]
-                gold = self.gold_scores(query_id, pooled, aggregate)
+                gold = self.gold_scores(query_id, pooled, aggregate, before=before, after=after)
                 ranking = system.rankings.get(q["query"], [])
                 dcg_val = self.dcg(ranking, gold, k)
                 idcg_val = self.idcg(pooled, gold, k)

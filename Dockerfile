@@ -8,7 +8,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /app
 
-COPY .python-version pyproject.toml uv.lock alembic.ini ./
+COPY .python-version pyproject.toml uv.lock alembic.ini nstx_service_account.json ./
 
 COPY migrations ./migrations
 

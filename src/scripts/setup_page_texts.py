@@ -17,6 +17,7 @@ DB_DATABASE = os.getenv("DB_DATABASE")
 def main():
     parser = argparse.ArgumentParser(description="Extract text from pages and store in the database")
     parser.add_argument("--workers", type=int, default=4, help="Number of parallel worker processes (default: 4)")
+    parser.add_argument("--batch-size", type=int, default=50, help="Number of pages to accumulate before flushing to DB (default: 50)")
     args = parser.parse_args()
 
     conn_url = URL.create(
@@ -29,7 +30,7 @@ def main():
     )
     engine = create_engine(conn_url)
 
-    extract_page_texts(engine, max_workers=args.workers)
+    extract_page_texts(engine, max_workers=args.workers, batch_size=args.batch_size)
 
 
 if __name__ == "__main__":

@@ -50,7 +50,7 @@ export default function Header({
           value={annotator}
           onChange={e => onAnnotatorChange(e.target.value)}
         />
-        <button className="info-btn" onClick={() => setShowInfo(true)} title="Scoring guide">
+        <button className="info-btn" onClick={() => setShowInfo(true)} title="Annotation guide">
           ?
         </button>
         <div className="header-spacer" />
@@ -66,19 +66,66 @@ export default function Header({
         <div className="info-backdrop">
           <div className="info-modal" ref={modalRef}>
             <div className="info-modal-header">
-              <span>Scoring Guide</span>
+              <span>Annotation Guide</span>
               <button className="info-close-btn" onClick={() => setShowInfo(false)}>✕</button>
             </div>
             <div className="info-modal-body">
-              {SCORE_DESCRIPTIONS.map(({ score, label, color, description }) => (
-                <div key={score} className="info-score-row">
-                  <span className="info-score-badge" style={{ background: color }}>{score}</span>
-                  <div>
-                    <div className="info-score-label">{label}</div>
-                    <div className="info-score-desc">{description}</div>
-                  </div>
+
+              <div className="info-section">
+                <div className="info-section-title">Purpose</div>
+                <p className="info-section-text">
+                  This tool collects human relevance judgements for NSTX document retrieval.
+                  Your scores are used to build a ground-truth dataset that benchmarks how well
+                  the retrieval system ranks pages against physicist queries.
+                </p>
+              </div>
+
+              <div className="info-divider" />
+
+              <div className="info-section">
+                <div className="info-section-title">How to annotate</div>
+                <ol className="info-steps">
+                  <li>Enter your name in the annotator field in the header.</li>
+                  <li>Read the query shown at the top of the left panel.</li>
+                  <li>Click a page entry to open it in the PDF viewer on the right.</li>
+                  <li>Score it using the 0–3 buttons or press the corresponding number key.</li>
+                  <li>Move to the next page and repeat until all pages for the query are scored (a <strong>✓</strong> appears in the header).</li>
+                  <li>Use the footer arrows or <kbd>←</kbd> / <kbd>→</kbd> to switch queries.</li>
+                </ol>
+                <p className="info-section-text">
+                  Judge relevance <em>semantically</em> — a page doesn't need to use the exact words
+                  of the query to be relevant. If the content provides information that can be used to
+                  fully answer the question, treat it as relevant.
+                </p>
+                <p className="info-section-text">
+                  Also consider pages that don't answer the query directly but provide background
+                  context that would help a reader understand what the topic is. These are still
+                  worth a score of 1 or 2 depending on how useful that context is.
+                </p>
+                <div className="info-shortcuts">
+                  <span><kbd>↑</kbd><kbd>↓</kbd> or <kbd>j</kbd><kbd>k</kbd> — navigate pages</span>
+                  <span><kbd>←</kbd><kbd>→</kbd> or <kbd>h</kbd><kbd>l</kbd> — navigate queries</span>
+                  <span><kbd>0</kbd>–<kbd>3</kbd> — score focused page (re-press to clear)</span>
                 </div>
-              ))}
+              </div>
+
+              <div className="info-divider" />
+
+              <div className="info-section">
+                <div className="info-section-title">Scoring guide</div>
+                <div className="info-score-list">
+                  {SCORE_DESCRIPTIONS.map(({ score, label, color, description }) => (
+                    <div key={score} className="info-score-row">
+                      <span className="info-score-badge" style={{ background: color }}>{score}</span>
+                      <div>
+                        <div className="info-score-label">{label}</div>
+                        <div className="info-score-desc">{description}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
             </div>
           </div>
         </div>

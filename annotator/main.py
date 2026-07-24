@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, select
 from sqlalchemy.engine import URL, create_engine
 from sqlalchemy.orm import Session
 
@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from document_retrieval.evaluation import AnnotationStore, QueryPool
-from document_retrieval.models import Document, EvaluationAnnotation, Page
+from document_retrieval.models import Document, EvaluationAnnotation, EvaluationNote, Page
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
@@ -69,6 +69,12 @@ class AnnotationRequest(BaseModel):
     score: int
 
 
+class NoteRequest(BaseModel):
+    annotator: str
+    query_id: int
+    note: str
+
+
 @app.get("/api/queries")
 def get_queries():
     if pool is None:
@@ -111,8 +117,14 @@ def get_query_pages(query_id: int):
 
 @app.get("/api/annotations/{annotator}/{query_id}")
 def get_annotations(annotator: str, query_id: int):
+    if pool is None:
+        raise HTTPException(503, "Query pool not loaded")
+    entry = next((q for q in pool.queries if q["id"] == query_id), None)
+    if entry is None:
+        raise HTTPException(404, f"Query {query_id} not found")
+    pool_page_ids = set(entry["pooled_page_ids"])
     annotations = store.get_annotations(query_id)
-    return annotations.get(annotator, {})
+    return {pid: score for pid, score in annotations.get(annotator, {}).items() if pid in pool_page_ids}
 
 
 @app.post("/api/annotations", status_code=204)
@@ -142,17 +154,44 @@ def delete_annotation(annotator: str, query_id: int, page_id: int):
 
 @app.get("/api/status/{annotator}")
 def get_annotator_status(annotator: str):
-    """Returns {query_id: annotated_page_count} for the given annotator."""
+    """Returns {query_id: annotated_page_count} for the given annotator, counting only pool pages."""
+    if pool is None:
+        return {}
+    pool_page_ids = {q["id"]: set(q["pooled_page_ids"]) for q in pool.queries}
     with Session(engine) as session:
         rows = session.execute(
-            select(
-                EvaluationAnnotation.query_id,
-                func.count(EvaluationAnnotation.id).label("cnt"),
-            )
+            select(EvaluationAnnotation.query_id, EvaluationAnnotation.page_id)
             .where(EvaluationAnnotation.annotator == annotator)
-            .group_by(EvaluationAnnotation.query_id)
         ).all()
-    return {row.query_id: row.cnt for row in rows}
+    counts: dict[int, int] = {}
+    for row in rows:
+        if row.query_id in pool_page_ids and row.page_id in pool_page_ids[row.query_id]:
+            counts[row.query_id] = counts.get(row.query_id, 0) + 1
+    return counts
+
+
+@app.get("/api/notes/{annotator}/{query_id}")
+def get_note(annotator: str, query_id: int):
+    with Session(engine) as session:
+        row = session.execute(
+            select(EvaluationNote.note)
+            .where(EvaluationNote.annotator == annotator, EvaluationNote.query_id == query_id)
+        ).first()
+    return {"note": row.note if row else ""}
+
+
+@app.post("/api/notes", status_code=204)
+def upsert_note(req: NoteRequest):
+    with Session(engine) as session:
+        existing = session.execute(
+            select(EvaluationNote)
+            .where(EvaluationNote.annotator == req.annotator, EvaluationNote.query_id == req.query_id)
+        ).scalar_one_or_none()
+        if existing:
+            existing.note = req.note
+        else:
+            session.add(EvaluationNote(annotator=req.annotator, query_id=req.query_id, note=req.note))
+        session.commit()
 
 
 @app.get("/api/images/{page_id}")

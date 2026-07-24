@@ -15,9 +15,11 @@ from .models import (
 from .embedding import (
     TfIdfDocEmbedder,
     BM25DocEmbedder,
+    TfIdfPageEmbedder,
+    BM25PageEmbedder,
     GeminiBiEncoderPageEmbedder
 )
-from .indexing import Indexer
+from .indexing import Indexer, TfIdfIndexer, BM25Indexer
 from .utils import timefunction, print_gpu_stats
 
 
@@ -271,6 +273,32 @@ class BM25DocRanker(DocRanker):
             )
 
         return rankings
+
+
+class TfIdfPageRanker:
+    def __init__(self, embedder: TfIdfPageEmbedder, indexer: TfIdfIndexer, engine: Engine):
+        self.embedder = embedder
+        self.indexer = indexer
+        self.engine = engine
+
+    @timefunction
+    def rank(self, queries: list[str], top_k: int = 100) -> list[PageRanking]:
+        query_embeddings = self.embedder.embed_queries(queries)
+        scores = self.indexer.retrieve(query_embeddings, top_k)
+        return [PageRanking.from_tuples(queries[i], scores[i], self.engine) for i in range(len(queries))]
+
+
+class BM25PageRanker:
+    def __init__(self, embedder: BM25PageEmbedder, indexer: BM25Indexer, engine: Engine):
+        self.embedder = embedder
+        self.indexer = indexer
+        self.engine = engine
+
+    @timefunction
+    def rank(self, queries: list[str], top_k: int = 100) -> list[PageRanking]:
+        query_tokens = self.embedder.embed_queries(queries)
+        scores = self.indexer.retrieve(query_tokens, top_k)
+        return [PageRanking.from_tuples(queries[i], scores[i], self.engine) for i in range(len(queries))]
 
 
 class NSTXViewBiEncoderPageRanker:

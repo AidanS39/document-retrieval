@@ -115,3 +115,17 @@ class EvaluationAnnotation(Base):
     __table_args__ = (
         UniqueConstraint("annotator", "query_id", "page_id", name="uq_annotation"),
     )
+
+
+class EvaluationNote(Base):
+    __tablename__ = "evaluation_note"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    annotator: Mapped[str]
+    query_id: Mapped[int]
+    note: Mapped[str] = mapped_column(default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    __table_args__ = (
+        UniqueConstraint("annotator", "query_id", name="uq_note"),
+    )

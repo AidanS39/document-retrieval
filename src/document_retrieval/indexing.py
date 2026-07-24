@@ -1,3 +1,5 @@
+import bm25s
+from sklearn.metrics.pairwise import cosine_similarity
 from document_retrieval.benchmarking import Timer, IndexingBatchTelemetry, PipelineMetadata
 import math
 import gc
@@ -25,6 +27,43 @@ class Indexer(ABC):
     @abstractmethod
     def retrieve(self, query_embeddings, top_k: int = 25):
         pass
+
+class TfIdfIndexer:
+    def __init__(self):
+        self.embeddings = None
+        self.page_ids: list[int] = []
+
+    def index_pages(self, embeddings, valid_ids: list[int]):
+        self.embeddings = embeddings
+        self.page_ids = valid_ids
+
+    def retrieve(self, query_embeddings, top_k: int = 25):
+        all_scores = cosine_similarity(query_embeddings, self.embeddings)
+        results = []
+        for scores in all_scores:
+            top_indices = sorted(range(len(self.page_ids)), key=lambda i: scores[i], reverse=True)[:top_k]
+            results.append([(self.page_ids[i], float(scores[i])) for i in top_indices])
+        return results
+
+
+class BM25Indexer:
+    def __init__(self):
+        self.index = bm25s.BM25()
+        self.page_ids: list[int] = []
+
+    def index_pages(self, tokenized_texts, valid_ids: list[int]):
+        self.page_ids = valid_ids
+        self.index.index(tokenized_texts)
+
+    def retrieve(self, tokenized_queries, top_k: int = 25):
+        results_indices, scores = self.index.retrieve(tokenized_queries, k=top_k)
+        results = []
+        for query_i, result_indices in enumerate(results_indices):
+            results.append([
+                (self.page_ids[page_i], float(scores[query_i][result_i]))
+                for result_i, page_i in enumerate(result_indices)
+            ])
+        return results
 
 class PGVectorIndexer(Indexer):
     def __init__(
@@ -104,6 +143,16 @@ class PGVectorIndexer(Indexer):
                 ).all()
                 query_results.append(rows)
         return query_results
+
+class GeminiEmbedding2Indexer(PGVectorIndexer):
+    def __init__(
+        self,
+        index_name,
+        device: torch.device,
+        data_dir: Path,
+        engine: Engine
+    ):
+        super().__init__(index_name, device, data_dir, engine, "gemini_embedding")
 
 class Qwen3VL2BIndexer(PGVectorIndexer):
     def __init__(
