@@ -13,6 +13,9 @@ wheels/
 data/
 plans/
 
+# Credentials
+*service_account.json
+
 # Remote development
 mutagen.yml
 mutagen.yml.lock

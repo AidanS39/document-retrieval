@@ -180,7 +180,7 @@ export default function App() {
       {showReg && (
         <div className="reg-backdrop">
           <div className="reg-modal">
-            <div className="reg-modal-title">Welcome to NSTX Annotator</div>
+            <div className="reg-modal-title">Welcome to Annotator</div>
             <p className="reg-modal-desc">Enter your name to begin annotating.</p>
             <input
               ref={regInputRef}

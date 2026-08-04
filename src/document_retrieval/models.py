@@ -60,46 +60,6 @@ class Page(Base):
     )
 
 
-class NSTXPaper(Base):
-    __tablename__ = "nstx_papers"
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    drive_file_id: Mapped[Optional[str]] = mapped_column(index=True, unique=True)
-    original_filename: Mapped[Optional[str]]
-    subfolder: Mapped[Optional[str]]
-    title: Mapped[Optional[str]]
-    authors: Mapped[Optional[str]]
-    journal: Mapped[Optional[str]]
-    publication_date: Mapped[Optional[str]]
-    doi: Mapped[Optional[str]] = mapped_column(index=True)
-    abstract: Mapped[Optional[str]]
-    key_findings: Mapped[Optional[str]]
-    experiment_type: Mapped[Optional[str]]
-    document_type: Mapped[Optional[str]]
-    page_count: Mapped[Optional[int]]
-    nstx_embeddings: Mapped[List["NSTXEmbedding"]] = relationship(
-        back_populates="paper", cascade="all, delete-orphan"
-    )
-
-
-class NSTXEmbedding(Base):
-    __tablename__ = "nstx_embeddings"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    paper_id: Mapped[int] = mapped_column(ForeignKey("nstx_papers.id", ondelete="CASCADE"))
-    paper: Mapped["NSTXPaper"] = relationship(
-        back_populates="nstx_embeddings",
-    )
-    content_type: Mapped[str]
-    chunk_index: Mapped[Optional[int]]
-    page_number: Mapped[Optional[int]]
-    figure_id: Mapped[Optional[str]]
-    content: Mapped[Optional[str]]
-    image_uri: Mapped[Optional[str]]
-    section: Mapped[Optional[str]]
-    page_start: Mapped[Optional[int]]
-    page_end: Mapped[Optional[int]]
-    embedding: Mapped[Optional[VECTOR]] = mapped_column(VECTOR(1536))
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime, server_default=func.now())
-
 
 class EvaluationAnnotation(Base):
     __tablename__ = "evaluation_annotation"

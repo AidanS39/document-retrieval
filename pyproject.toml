@@ -55,4 +55,4 @@ markers = [
 ]
 
 [tool.uvs.scripts]
-remote-sync = 'rsync -avhP LOCAL_SYNC_PATH_REDACTED REMOTE_SYNC_URL_REDACTED --filter=":- .gitignore"'
+remote-sync = "bash -c 'set -a; source .env; set +a; rsync -avhP \"$LOCAL_SYNC_PATH\" \"$REMOTE_SYNC_URL\" --filter=\":- .gitignore\"'"

@@ -180,6 +180,29 @@ class AnnotationStore:
             result.setdefault(annotator, {})[page_id] = score
         return result
 
+    def get_annotated_queries(
+        self,
+        before: Optional[datetime] = None,
+        after: Optional[datetime] = None,
+    ) -> list[dict]:
+        stmt = select(
+            EvaluationAnnotation.query_id,
+            EvaluationAnnotation.query,
+            EvaluationAnnotation.page_id,
+        ).distinct()
+        if before is not None:
+            stmt = stmt.where(EvaluationAnnotation.submitted_at < before)
+        if after is not None:
+            stmt = stmt.where(EvaluationAnnotation.submitted_at > after)
+        with Session(self.engine) as session:
+            rows = session.execute(stmt).all()
+        queries: dict[int, dict] = {}
+        for query_id, query, page_id in rows:
+            if query_id not in queries:
+                queries[query_id] = {"query_id": query_id, "query": query, "annotated_page_ids": []}
+            queries[query_id]["annotated_page_ids"].append(page_id)
+        return sorted(queries.values(), key=lambda q: q["query_id"])
+
     def get_all_annotators(self) -> list[str]:
         with Session(self.engine) as session:
             return list(session.execute(
@@ -253,6 +276,7 @@ class NDCGComputer:
         aggregate: str = "mean",
         before: Optional[datetime] = None,
         after: Optional[datetime] = None,
+        include_zero_idcg: bool = False,
     ) -> dict:
         results = {
             "computed_at": datetime.now(timezone.utc).isoformat(),
@@ -279,10 +303,54 @@ class NDCGComputer:
                     "dcg": dcg_val,
                     "idcg": idcg_val,
                 })
-            mean_ndcg = (
-                sum(r["ndcg"] for r in per_query) / len(per_query)
-                if per_query else 0.0
-            )
+            scoreable = per_query if include_zero_idcg else [r for r in per_query if r["idcg"] > 0]
+            mean_ndcg = sum(r["ndcg"] for r in scoreable) / len(scoreable) if scoreable else 0.0
+            results["systems"].append({
+                "system_id": system.id,
+                "name": system.name,
+                "mean_ndcg": mean_ndcg,
+                "per_query": per_query,
+            })
+        return results
+
+    def compute_pool_free(
+        self,
+        systems: list[RetrievalSystem],
+        k: int,
+        aggregate: str = "mean",
+        before: Optional[datetime] = None,
+        after: Optional[datetime] = None,
+        include_zero_idcg: bool = False,
+    ) -> dict:
+        queries = self.store.get_annotated_queries(before=before, after=after)
+        results = {
+            "computed_at": datetime.now(timezone.utc).isoformat(),
+            "k": k,
+            "score_aggregate": aggregate,
+            "annotation_before": before.isoformat() if before else None,
+            "annotation_after": after.isoformat() if after else None,
+            "pool_free": True,
+            "systems": [],
+        }
+        for system in systems:
+            per_query = []
+            for q in queries:
+                query_id = q["query_id"]
+                annotated_page_ids = q["annotated_page_ids"]
+                gold = self.gold_scores(query_id, annotated_page_ids, aggregate, before=before, after=after)
+                ranking = system.rankings.get(q["query"], [])
+                dcg_val = self.dcg(ranking, gold, k)
+                idcg_val = self.idcg(annotated_page_ids, gold, k)
+                ndcg_val = dcg_val / idcg_val if idcg_val > 0 else 0.0
+                per_query.append({
+                    "query_id": query_id,
+                    "query": q["query"],
+                    "ndcg": ndcg_val,
+                    "dcg": dcg_val,
+                    "idcg": idcg_val,
+                })
+            scoreable = per_query if include_zero_idcg else [r for r in per_query if r["idcg"] > 0]
+            mean_ndcg = sum(r["ndcg"] for r in scoreable) / len(scoreable) if scoreable else 0.0
             results["systems"].append({
                 "system_id": system.id,
                 "name": system.name,

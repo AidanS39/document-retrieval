@@ -23,8 +23,8 @@ def main():
     parser.add_argument(
         "--pool",
         type=Path,
-        default=eval_dir / "query_pool.json",
-        help="Path to query_pool.json (default: $DATA_DIR/evaluation/query_pool.json)",
+        default=None,
+        help="Path to query_pool.json. If omitted, queries and annotated pages are read directly from the DB.",
     )
     parser.add_argument(
         "--systems-dir",
@@ -51,6 +51,12 @@ def main():
         help="Output directory for ndcg_results_{timestamp}.json (default: $DATA_DIR/evaluation/results)",
     )
     parser.add_argument(
+        "--include-zero-idcg",
+        action="store_true",
+        default=False,
+        help="Include queries with IDCG=0 in the mean NDCG (default: exclude them)",
+    )
+    parser.add_argument(
         "--before",
         type=datetime.fromisoformat,
         default=None,
@@ -65,9 +71,6 @@ def main():
     args = parser.parse_args()
 
     from document_retrieval.evaluation import AnnotationStore, NDCGComputer, QueryPool, RetrievalSystem
-
-    pool = QueryPool.import_from_json(args.pool)
-    print(f"Loaded pool: {len(pool.queries)} queries, {len(pool.system_ids)} contributing systems")
 
     system_files = sorted(args.systems_dir.glob("system_*.json"))
     if not system_files:
@@ -91,10 +94,23 @@ def main():
     print(f"Annotators in DB: {annotators if annotators else '(none)'}")
 
     computer = NDCGComputer(store)
-    results = computer.compute(
-        pool, systems, k=args.k, aggregate=args.aggregate,
-        before=args.before, after=args.after,
-    )
+
+    if args.pool is not None:
+        pool = QueryPool.import_from_json(args.pool)
+        print(f"Loaded pool: {len(pool.queries)} queries, {len(pool.system_ids)} contributing systems")
+        results = computer.compute(
+            pool, systems, k=args.k, aggregate=args.aggregate,
+            before=args.before, after=args.after,
+            include_zero_idcg=args.include_zero_idcg,
+        )
+    else:
+        print("No pool specified — using all annotated queries and pages from DB")
+        results = computer.compute_pool_free(
+            systems, k=args.k, aggregate=args.aggregate,
+            before=args.before, after=args.after,
+            include_zero_idcg=args.include_zero_idcg,
+        )
+
     out_path = computer.export_results(results, args.out)
     print(f"\nResults written to {out_path}")
 

@@ -3,7 +3,7 @@ services:
     build: .
     shm_size: '2gb'
     volumes:
-      - ./nstx_data:/app/data
+      - ./data:/app/data
       - ./src:/app/src
       - ./migrations:/app/migrations
     env_file:
@@ -41,7 +41,7 @@ services:
     working_dir: /app
     command: uv run uvicorn annotator.main:app --host 0.0.0.0 --port 8001 --reload
     volumes:
-      - ./nstx_data:/app/data
+      - ./data:/app/data
       - ./src:/app/src
       - ./annotator:/app/annotator
     env_file:

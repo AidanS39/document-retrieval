@@ -42,7 +42,7 @@ export default function Header({
   return (
     <>
       <header className="header">
-        <span className="header-title">NSTX Annotator</span>
+        <span className="header-title">Annotator</span>
         <input
           className="annotator-input"
           type="text"
@@ -74,7 +74,7 @@ export default function Header({
               <div className="info-section">
                 <div className="info-section-title">Purpose</div>
                 <p className="info-section-text">
-                  This tool collects human relevance judgements for NSTX document retrieval.
+                  This tool collects human relevance judgements for document retrieval.
                   Your scores are used to build a ground-truth dataset that benchmarks how well
                   the retrieval system ranks pages against physicist queries.
                 </p>

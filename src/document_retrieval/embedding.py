@@ -201,7 +201,7 @@ class GeminiBiEncoderPageEmbedder(PageEmbedder):
         self.data_dir = data_dir
         self.client = genai.Client(
             vertexai=True,
-            project=os.environ.get("GCP_PROJECT_ID", "GCP_PROJECT_REDACTED"),
+            project=os.environ.get("GCP_PROJECT_ID"),
             location=os.environ.get("VERTEX_LOCATION", "us"),
             credentials=_load_vertex_credentials(),
         )

@@ -1,7 +1,7 @@
 """Added indexes to path and image_path
 
 Revision ID: d1d4fefd4883
-Revises: cd848ddd7cea
+Revises: 0d2ae2783bb1
 Create Date: 2026-07-17 17:02:46.141876
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'd1d4fefd4883'
-down_revision: Union[str, Sequence[str], None] = 'cd848ddd7cea'
+down_revision: Union[str, Sequence[str], None] = '0d2ae2783bb1'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -9,7 +9,7 @@ export default defineConfig({
       '/api': process.env.API_URL ?? 'http://localhost:8000',
     },
     allowedHosts: [
-      "HOST_REDACTED"
+      process.env.HOST
     ]
   },
 })
