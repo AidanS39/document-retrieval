@@ -25,14 +25,14 @@ A Python framework that provides a common interface for the document retrieval p
    uv sync
    ```
 
-3. Start the PostgreSQL database with pgvector:
-   ```bash
-   docker-compose up -d
-   ```
-
-4. Copy the example environment file and fill in your values:
+3. Copy the example environment file and fill in your values:
    ```bash
    cp .env.example .env
+   ```
+
+4. Start the PostgreSQL database with pgvector and the application:
+   ```bash
+   docker-compose up -d
    ```
 
 5. Run database migrations:
@@ -52,9 +52,8 @@ The setup utilities in `src/document_retrieval/setup.py` walk through each stage
 from sqlalchemy import create_engine
 from pathlib import Path
 from document_retrieval.setup import DatabaseSetup, EmbeddingSetup
-from document_retrieval.embedding import TomoroAIColPageEmbedder
 from document_retrieval.indexing import FastPlaidIndexer
-from document_retrieval.ranking import ColPageRanker
+from scripts.config import build_ranker
 import torch
 
 engine = create_engine("postgresql+psycopg://...")
@@ -66,17 +65,16 @@ setup = DatabaseSetup(engine, data_dir)
 setup.setup_db()
 setup.seed_db()
 
-# 2. Embed all pages
-embedder = TomoroAIColPageEmbedder(engine, device, data_dir)
+# 2. Embed all pages and build the search index (system 7: TomoroAI ColQwen3 4B + FastPlaid)
 embedding_setup = EmbeddingSetup(engine, data_dir)
-embedding_setup.setup_page_embeddings(embedder)
+embedding_setup.setup_page_embeddings(build_ranker(7, engine, device, data_dir).embedder)
 
 # 3. Build the search index
-indexer = FastPlaidIndexer("my-index", device, data_dir)
+indexer = FastPlaidIndexer("TomoroAI/tomoro-colqwen3-embed-4b", device, data_dir)
 indexer.index_pages(total_pages=1000)
 
 # 4. Rank documents against a query
-ranker = ColPageRanker(embedder, indexer, engine)
+ranker = build_ranker(7, engine, device, data_dir)
 rankings = ranker.rank(["what is the plasma current?"], top_k=10)
 print(rankings[0])
 ```
@@ -85,6 +83,31 @@ For an interactive retrieval session, run:
 ```bash
 uv run python src/main.py
 ```
+
+This presents a numbered menu of the configured retrieval systems and prompts for a query.
+
+---
+
+## Retrieval Systems
+
+`src/scripts/config.py` defines 12 pre-configured retrieval systems. Each pairs an embedder with an indexer:
+
+| ID | Name | Model | Paradigm | Index |
+|----|------|-------|----------|-------|
+| 1 | Nemotron ColEmbed 3B + FastPlaid | `nvidia/llama-nemotron-colembed-vl-3b-v2` | col | fast_plaid |
+| 2 | WebAI ColVec1 9B + FastPlaid | `webAI-Official/webAI-ColVec1-9b` | col | fast_plaid |
+| 3 | WebAI ColVec1 4B + FastPlaid | `webAI-Official/webAI-ColVec1-4b` | col | fast_plaid |
+| 4 | Qwen3 VL Embedding 2B + pgvector | `Qwen/Qwen3-VL-Embedding-2B` | bi_encoder | pgvector |
+| 5 | Vultron Qwen3.5 4.5B + FastPlaid | `vultr/VultronRetrieverCore-Qwen3.5-4.5B` | col | fast_plaid |
+| 6 | ColQwen3.5 4.5B v3 + FastPlaid | `athrael-soju/colqwen3.5-4.5B-v3` | col | fast_plaid |
+| 7 | TomoroAI ColQwen3 4B + FastPlaid | `TomoroAI/tomoro-colqwen3-embed-4b` | col | fast_plaid |
+| 8 | TomoroAI ColQwen3 8B + FastPlaid | `TomoroAI/tomoro-colqwen3-embed-8b` | col | fast_plaid |
+| 9 | Jina V4 Embedding + pgvector | `jinaai/jina-embeddings-v4` | bi_encoder | pgvector |
+| 10 | TF-IDF | `tf_idf` | bi_encoder | local |
+| 11 | BM25 | `bm_25` | bi_encoder | local |
+| 12 | Gemini Embedding 2 + pgvector | `gemini-embedding-2` | bi_encoder | pgvector |
+
+`build_ranker(system_id, engine, device, data_dir)` constructs the appropriate embedder/indexer pair for any system ID.
 
 ---
 
@@ -115,7 +138,19 @@ Two abstract variants cover the two granularities:
 - **`PageEmbedder`** — embeds page images; used with vision-language models
 - **`DocEmbedder`** — embeds document text; used with sparse retrieval methods
 
-Built-in implementations include TF-IDF, BM25, a bi-encoder (`Qwen3-VL-Embedding-2B`), and several ColQwen-style late-interaction models (Nemotron, WebAI, TomoroAI, Qwen3).
+Built-in implementations:
+
+| Class | Model(s) | Type |
+|-------|----------|------|
+| `TfIdfPageEmbedder` / `TfIdfDocEmbedder` | TF-IDF | Sparse |
+| `BM25PageEmbedder` / `BM25DocEmbedder` | BM25 | Sparse |
+| `Qwen3VLBiEncoderPageEmbedder` | `Qwen3-VL-Embedding-2B/8B` | Bi-encoder |
+| `JinaV4BiEncoderPageEmbedder` | `jinaai/jina-embeddings-v4` | Bi-encoder |
+| `GeminiBiEncoderPageEmbedder` | `gemini-embedding-2` | Bi-encoder |
+| `NemotronColPageEmbedder` | `nvidia/llama-nemotron-colembed-vl-3b-v2` | Late-interaction |
+| `WebAIColPageEmbedder` | `webAI-Official/webAI-ColVec1-4b/9b` | Late-interaction |
+| `TomoroAIColPageEmbedder` | `TomoroAI/tomoro-colqwen3-embed-4b/8b` | Late-interaction |
+| `Qwen3_5ColPageEmbedder` | `vultr/VultronRetrieverCore-Qwen3.5-4.5B`, `athrael-soju/colqwen3.5-4.5B-v3` | Late-interaction |
 
 ### Indexer
 
@@ -129,7 +164,16 @@ class Indexer(ABC):
     def retrieve(self, query_embeddings, top_k: int = 25) -> list[tuple[int, float]]: ...
 ```
 
-The built-in implementation, `FastPlaidIndexer`, uses the [FastPlaid](https://github.com/stanford-futuredata/plaid) library for late-interaction retrieval. It loads embeddings from disk in batches, builds a k-means quantized index, and returns `(page_id, score)` tuples.
+Built-in implementations:
+
+| Class | Backend | Best used with |
+|-------|---------|----------------|
+| `FastPlaidIndexer` | [FastPlaid](https://github.com/stanford-futuredata/plaid) k-means quantized index | Late-interaction (ColQwen-style) embedders |
+| `PGVectorIndexer` | PostgreSQL pgvector ANN | Bi-encoder embedders |
+| `Qwen3VL2BIndexer` / `Qwen3VL8BIndexer` | pgvector (model-specific columns) | `Qwen3-VL-Embedding-2B/8B` |
+| `GeminiEmbedding2Indexer` | pgvector (model-specific column) | `gemini-embedding-2` |
+| `TfIdfIndexer` | In-memory sklearn | `TfIdfPageEmbedder` |
+| `BM25Indexer` | In-memory rank-bm25 | `BM25PageEmbedder` |
 
 ### Ranker
 
@@ -142,4 +186,81 @@ class PageRanker(ABC):
     def rank(self, queries: list[str], top_k: int = 100) -> list[PageRanking]: ...
 ```
 
-Concrete rankers (`ColPageRanker`, `BiEncoderPageRanker`, `TfIdfDocRanker`, `BM25DocRanker`) pair specific embedders with specific retrieval backends. Keeping this composition explicit makes it straightforward to benchmark one configuration against another.
+Concrete rankers (`PageRanker`, `TfIdfPageRanker`, `BM25PageRanker`, `TfIdfDocRanker`, `BM25DocRanker`) pair specific embedders with specific retrieval backends. Keeping this composition explicit makes it straightforward to benchmark one configuration against another.
+
+---
+
+## Evaluation
+
+The evaluation pipeline measures retrieval quality (NDCG) across systems using pooled annotations.
+
+### Workflow
+
+1. **Run systems** — generate per-system rankings for a query set:
+   ```bash
+   uv run python src/scripts/run_system_ranking.py --system-id 7 --queries-file data/evaluation/queries.json
+   ```
+
+2. **Build query pool** — merge rankings across systems into a pool for annotation:
+   ```bash
+   uv run python src/scripts/setup_evaluation.py
+   ```
+
+3. **Annotate** — use the annotator tool (see below) to label page relevance.
+
+4. **Compute NDCG** — score all systems against the collected annotations:
+   ```bash
+   uv run python src/scripts/compute_ndcg.py --k 10
+   ```
+
+Results are written to `data/evaluation/results/ndcg_results_{timestamp}.json`.
+
+---
+
+## Annotator
+
+The annotator is a web tool for labeling page relevance. It runs as two Docker services defined in `docker-compose.yml`:
+
+- **`annotator-backend`** — FastAPI server on port 8001
+- **`annotator-frontend`** — Vite/Node frontend on port 5173
+
+Start both with:
+```bash
+docker-compose up -d annotator-backend annotator-frontend
+```
+
+Then open `http://localhost:5173` in a browser.
+
+---
+
+## Benchmarking
+
+`src/document_retrieval/benchmarking.py` provides telemetry classes for profiling the embedding and indexing stages of the pipeline. `PipelineMetadata` accumulates per-batch timing and GPU memory stats and can export a JSON summary:
+
+```python
+metadata.print_telemetry_summary()   # prints timing per page for embed + index
+metadata.export_to_json()            # writes a timestamped JSON file to the embeddings path
+```
+
+Per-query latency can be benchmarked separately:
+```bash
+uv run python src/scripts/benchmark_query_latency.py --system-id 7
+```
+
+---
+
+## Docker
+
+The full stack is defined in `docker-compose.yml`. Key services:
+
+| Service | Description | Port |
+|---------|-------------|------|
+| `db` | PostgreSQL 17 + pgvector | 5433 (host) |
+| `app` | Interactive retrieval CLI | — |
+| `annotator-backend` | Annotation API | 8001 |
+| `annotator-frontend` | Annotation UI | 5173 |
+
+To run the test suite inside Docker:
+```bash
+docker-compose --profile test up app-test
+```
