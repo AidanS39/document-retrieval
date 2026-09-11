@@ -46,40 +46,29 @@ A Python framework that provides a common interface for the document retrieval p
 
 Place your documents (PDF, DOCX, PPTX, or TXT) in `data/documents/`.
 
-The setup utilities in `src/document_retrieval/setup.py` walk through each stage of the pipeline:
+Each pipeline stage has a corresponding script in `src/scripts/`. Run them in order:
 
-```python
-from sqlalchemy import create_engine
-from pathlib import Path
-from document_retrieval.setup import DatabaseSetup, EmbeddingSetup
-from document_retrieval.indexing import FastPlaidIndexer
-from scripts.config import build_ranker
-import torch
-
-engine = create_engine("postgresql+psycopg://...")
-data_dir = Path("data")
-device = torch.device("cuda")
-
-# 1. Seed the database and preprocess documents
-setup = DatabaseSetup(engine, data_dir)
-setup.setup_db()
-setup.seed_db()
-
-# 2. Embed all pages and build the search index (system 7: TomoroAI ColQwen3 4B + FastPlaid)
-embedding_setup = EmbeddingSetup(engine, data_dir)
-embedding_setup.setup_page_embeddings(build_ranker(7, engine, device, data_dir).embedder)
-
-# 3. Build the search index
-indexer = FastPlaidIndexer("TomoroAI/tomoro-colqwen3-embed-4b", device, data_dir)
-indexer.index_pages(total_pages=1000)
-
-# 4. Rank documents against a query
-ranker = build_ranker(7, engine, device, data_dir)
-rankings = ranker.rank(["what is the plasma current?"], top_k=10)
-print(rankings[0])
+**1. Set up the database schema:**
+```bash
+uv run python src/scripts/setup_db.py
 ```
 
-For an interactive retrieval session, run:
+**2. Seed the database** — inserts documents, renders page images, and extracts page text:
+```bash
+uv run python src/scripts/seed_db.py
+```
+
+**3. Generate page embeddings** — choose a model from the [retrieval systems table](#retrieval-systems):
+```bash
+uv run python src/scripts/setup_embeddings.py --model TomoroAI/tomoro-colqwen3-embed-4b --device cuda:0
+```
+
+**4. Build the search index:**
+```bash
+uv run python src/scripts/setup_index.py --model TomoroAI/tomoro-colqwen3-embed-4b --device cuda:0
+```
+
+**5. Run an interactive retrieval session:**
 ```bash
 uv run python src/main.py
 ```
