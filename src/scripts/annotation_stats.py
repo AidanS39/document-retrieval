@@ -248,6 +248,12 @@ def main():
         if system_files:
             from document_retrieval.evaluation import RetrievalSystem
             systems = [RetrievalSystem.import_from_json(p) for p in system_files]
+        else:
+            print()
+            print(f"  (No system_*.json files found in {args.systems_dir}, skipping NDCG stats)")
+    elif args.systems_dir:
+        print()
+        print(f"  (Systems directory not found at {args.systems_dir}, skipping NDCG stats)")
 
     if pool and systems:
         from document_retrieval.evaluation import AnnotationStore, NDCGComputer

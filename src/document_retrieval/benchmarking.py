@@ -78,14 +78,25 @@ class PipelineMetadata:
     def print_telemetry_summary(self):
         print("---------------------------------------------------------")
         print(f"Pipeline Summary for {self.model_name}")
+        print(f"Embeddings path: {self.embeddings_path}")
+        if self.batches:
+            shape = self.batches[0].embedding_telemetry.embedding_shape
+            print(f"Embedding shape (per page): {shape}")
         print(f"Total time spent embedding: {self.telemetry.total_embedding_time:.4f} seconds")
         print(f"Total pages embedded: {self.telemetry.total_embedding_pages}")
         if self.telemetry.total_embedding_pages > 0:
             print(f"Time per page (embedding): {self.telemetry.total_embedding_time / self.telemetry.total_embedding_pages:.4f} seconds")
+        if self.batches:
+            peak_embed_gpu = max(b.embedding_telemetry.gpu_stats[2] for b in self.batches)
+            print(f"Peak GPU memory (embedding): {peak_embed_gpu:.3f} GB")
         print(f"Total time spent indexing: {self.telemetry.total_indexing_time:.4f} seconds")
         print(f"Total pages indexed: {self.telemetry.total_indexing_pages}")
         if self.telemetry.total_indexing_pages > 0:
             print(f"Time per page (indexing): {self.telemetry.total_indexing_time / self.telemetry.total_indexing_pages:.4f} seconds")
+        indexed_batches = [b for b in self.batches if b.indexing_telemetry is not None]
+        if indexed_batches:
+            peak_index_gpu = max(b.indexing_telemetry.gpu_stats[2] for b in indexed_batches)
+            print(f"Peak GPU memory (indexing): {peak_index_gpu:.3f} GB")
         print("---------------------------------------------------------")
 
     def save(self):
