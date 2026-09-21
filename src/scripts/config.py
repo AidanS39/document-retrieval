@@ -2,18 +2,17 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 import argparse
 from pathlib import Path
-from document_retrieval.embedding import (
-    NemotronColPageEmbedder,
-    WebAIColPageEmbedder,
-    TomoroAIColPageEmbedder,
-    Qwen3_5ColPageEmbedder,
-    Qwen3VLBiEncoderPageEmbedder,
-    JinaV4BiEncoderPageEmbedder,
-    GeminiBiEncoderPageEmbedder,
-    TfIdfPageEmbedder,
-    BM25PageEmbedder,
-    _last_token_pool_embed,
-)
+from document_retrieval.embedders.nemotron import NemotronColPageEmbedder
+from document_retrieval.embedders.webai import WebAIColPageEmbedder
+from document_retrieval.embedders.tomoroai import TomoroAIColPageEmbedder
+from document_retrieval.embedders.colqwen import Qwen3_5ColPageEmbedder
+from document_retrieval.embedders.qwen import Qwen3VLBiEncoderPageEmbedder
+from document_retrieval.embedders.jina import JinaV4BiEncoderPageEmbedder
+from document_retrieval.embedders.gemini import GeminiBiEncoderPageEmbedder
+from document_retrieval.embedders.tfidf import TfIdfPageEmbedder
+from document_retrieval.embedders.bm25 import BM25PageEmbedder
+from document_retrieval.embedding import _last_token_pool_embed
+
 from document_retrieval.indexing import FastPlaidIndexer, PGVectorIndexer, GeminiEmbedding2Indexer, Qwen3VL2BIndexer, Qwen3VL8BIndexer, TfIdfIndexer, BM25Indexer
 from document_retrieval.ranking import PageRanker, TfIdfPageRanker, BM25PageRanker
 from document_retrieval.models import Page
