@@ -14,10 +14,11 @@ from .models import Document, Page
 from .setup import DatabaseSetup
 from .utils import get_device
 from .utils import timefunction
-from .embedding import WebAIColPageEmbedder
-from .indexing import FastPlaidIndexer
+from .embedders.webai import WebAIColPageEmbedder
+from .indexes.fastplaid import FastPlaidIndexer
 from .ranking import PageRanker
-from .ranking import TfIdfDocRanker, BM25DocRanker
+from .rankers.tfidf import TfIdfDocRanker
+from .rankers.bm25 import BM25DocRanker
 
 load_dotenv()
 

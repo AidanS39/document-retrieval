@@ -6,7 +6,7 @@ import torch
 from fast_plaid import filtering
 
 from document_retrieval.benchmarking import PipelineMetadata
-from document_retrieval.indexing import FastPlaidIndexer
+from document_retrieval.indexes.fastplaid import FastPlaidIndexer
 
 
 def test_delete_duplicates(device: torch.device):

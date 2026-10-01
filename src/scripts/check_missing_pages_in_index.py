@@ -4,7 +4,7 @@ from sqlalchemy import URL, create_engine, select
 import os
 from pathlib import Path
 from document_retrieval.utils import get_device
-from document_retrieval.indexing import FastPlaidIndexer
+from document_retrieval.indexes.fastplaid import FastPlaidIndexer
 
 
 def main():

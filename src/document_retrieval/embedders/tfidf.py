@@ -1,4 +1,4 @@
-from .. import embedding
+from ..embedding import DocEmbedder, PageEmbedder
 from ..models import Document, Page
 
 from sqlalchemy.orm import Session
@@ -8,7 +8,7 @@ from sqlalchemy.engine import Engine
 from sklearn.feature_extraction.text import TfidfVectorizer
 from scipy.sparse import csr_matrix
 
-class TfIdfDocEmbedder(embedding.DocEmbedder):
+class TfIdfDocEmbedder(DocEmbedder):
     def __init__(self, engine: Engine):
         super().__init__(engine)
         self.vectorizer = TfidfVectorizer()
@@ -30,7 +30,7 @@ class TfIdfDocEmbedder(embedding.DocEmbedder):
         return query_embeddings
 
 
-class TfIdfPageEmbedder(embedding.PageEmbedder):
+class TfIdfPageEmbedder(PageEmbedder):
     def __init__(self, engine: Engine):
         super().__init__(engine)
         self.vectorizer = TfidfVectorizer()

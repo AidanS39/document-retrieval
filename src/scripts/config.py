@@ -13,8 +13,13 @@ from document_retrieval.embedders.tfidf import TfIdfPageEmbedder
 from document_retrieval.embedders.bm25 import BM25PageEmbedder
 from document_retrieval.embedding import _last_token_pool_embed
 
-from document_retrieval.indexing import FastPlaidIndexer, PGVectorIndexer, GeminiEmbedding2Indexer, Qwen3VL2BIndexer, Qwen3VL8BIndexer, TfIdfIndexer, BM25Indexer
-from document_retrieval.ranking import PageRanker, TfIdfPageRanker, BM25PageRanker
+from document_retrieval.indexes.fastplaid import FastPlaidIndexer
+from document_retrieval.indexes.pgvector import PGVectorIndexer, GeminiEmbedding2Indexer, Qwen3VL2BIndexer, Qwen3VL8BIndexer
+from document_retrieval.indexes.tfidf import TfIdfIndexer
+from document_retrieval.indexes.bm25 import BM25Indexer
+from document_retrieval.ranking import PageRanker
+from document_retrieval.rankers.tfidf import TfIdfPageRanker
+from document_retrieval.rankers.bm25 import BM25PageRanker
 from document_retrieval.models import Page
 from document_retrieval.evaluation import RetrievalSystem
 

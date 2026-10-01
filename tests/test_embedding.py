@@ -1,11 +1,13 @@
 import pytest
 import torch
 
-from document_retrieval.embedding import (
-    NemotronColPageEmbedder,
-    TransformersBasedPageEmbedder,
-    WebAIColPageEmbedder, TomoroAIColPageEmbedder, Qwen3_5ColPageEmbedder, Qwen3VLBiEncoderPageEmbedder, JinaV4BiEncoderPageEmbedder,
-)
+from document_retrieval.embedding import TransformersBasedPageEmbedder
+from document_retrieval.embedders.nemotron import NemotronColPageEmbedder
+from document_retrieval.embedders.webai import WebAIColPageEmbedder
+from document_retrieval.embedders.tomoroai import TomoroAIColPageEmbedder
+from document_retrieval.embedders.colqwen import Qwen3_5ColPageEmbedder
+from document_retrieval.embedders.qwen import Qwen3VLBiEncoderPageEmbedder
+from document_retrieval.embedders.jina import JinaV4BiEncoderPageEmbedder
 
 WEBAI_MODELS = [
     "webAI-Official/webAI-ColVec1-4b",

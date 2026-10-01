@@ -139,7 +139,7 @@ class AnnotationStore:
     def __init__(self, engine):
         self.engine = engine
 
-    def submit(self, annotator: str, query_id: int, query: str, page_id: int, score: int):
+    def submit(self, annotator: str, query_id: int, query: str, page_id: int, score: int, explanation: str = ""):
         stmt = (
             pg_insert(EvaluationAnnotation)
             .values(
@@ -148,10 +148,11 @@ class AnnotationStore:
                 query=query,
                 page_id=page_id,
                 score=score,
+                explanation=explanation,
             )
             .on_conflict_do_update(
                 index_elements=["annotator", "query_id", "page_id"],
-                set_={"score": score, "submitted_at": func.now()},
+                set_={"score": score, "explanation": explanation, "submitted_at": func.now()},
             )
         )
         with Session(self.engine) as session:

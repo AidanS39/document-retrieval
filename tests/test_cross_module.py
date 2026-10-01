@@ -10,15 +10,14 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from document_retrieval.benchmarking import PipelineMetadata
-from document_retrieval.embedding import (
-    NemotronColPageEmbedder,
-    TomoroAIColPageEmbedder,
-    WebAIColPageEmbedder,
-    Qwen3_5ColPageEmbedder,
-    TransformersBasedPageEmbedder,
-    Qwen3VLBiEncoderPageEmbedder,
-)
-from document_retrieval.indexing import FastPlaidIndexer, PGVectorIndexer, Qwen3VL2BIndexer, Qwen3VL8BIndexer
+from document_retrieval.embedding import TransformersBasedPageEmbedder
+from document_retrieval.embedders.nemotron import NemotronColPageEmbedder
+from document_retrieval.embedders.tomoroai import TomoroAIColPageEmbedder
+from document_retrieval.embedders.webai import WebAIColPageEmbedder
+from document_retrieval.embedders.colqwen import Qwen3_5ColPageEmbedder
+from document_retrieval.embedders.qwen import Qwen3VLBiEncoderPageEmbedder
+from document_retrieval.indexes.fastplaid import FastPlaidIndexer
+from document_retrieval.indexes.pgvector import PGVectorIndexer, Qwen3VL2BIndexer, Qwen3VL8BIndexer
 from document_retrieval.models import Page
 
 WEBAI_MODELS = [

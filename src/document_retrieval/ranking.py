@@ -1,22 +1,10 @@
 from abc import ABC, abstractmethod
-import bm25s
-from sklearn.metrics.pairwise import cosine_similarity
-from scipy.sparse import csr_matrix
 from sqlalchemy import select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, joinedload
 
-from .models import (
-    Document,
-    Page,
-)
-from .embedding import (
-    TfIdfDocEmbedder,
-    BM25DocEmbedder,
-    TfIdfPageEmbedder,
-    BM25PageEmbedder,
-)
-from .indexing import Indexer, TfIdfIndexer, BM25Indexer
+from .models import Document, Page
+from .indexing import Indexer
 from .utils import timefunction, print_gpu_stats
 
 
@@ -144,102 +132,6 @@ class PageRanker:
         print_gpu_stats()
         query_embeddings = self.embedder.embed_queries(queries)
         scores = self.indexer.retrieve(query_embeddings, top_k)
-        return [PageRanking.from_tuples(queries[i], scores[i], self.engine) for i in range(len(queries))]
-
-
-class TfIdfDocRanker(DocRanker):
-    embedder: TfIdfDocEmbedder
-    doc_ids: list[int]
-    doc_embeddings: csr_matrix
-    engine: Engine
-
-    def __init__(self, engine):
-        self.embedder = TfIdfDocEmbedder(engine)
-        self.engine = engine
-
-    @timefunction
-    def fit(self, doc_ids: list[int]):
-        self.doc_ids = doc_ids
-        self.doc_embeddings = self.embedder.embed_docs(doc_ids)
-
-    @timefunction
-    def rank(self, queries: list[str], top_k: int = 100) -> list[DocRanking]:
-        query_embeddings = self.embedder.embed_queries(queries)
-
-        all_scores = cosine_similarity(query_embeddings, self.doc_embeddings)
-
-        rankings = list()
-
-        for query_i, scores in enumerate(all_scores):
-            score_tuples = [
-                (self.doc_ids[doc_i], score)
-                for doc_i, score in enumerate(scores[:top_k])
-            ]
-            rankings.append(
-                DocRanking.from_tuples(queries[query_i], score_tuples, self.engine)
-            )
-
-        return rankings
-
-
-class BM25DocRanker(DocRanker):
-    embedder: BM25DocEmbedder
-    doc_ids: list[int]
-    engine: Engine
-
-    def __init__(self, engine):
-        super().__init__()
-        self.embedder = BM25DocEmbedder(engine)
-        self.engine = engine
-
-    @timefunction
-    def fit(self, doc_ids: list[int]):
-        self.doc_ids = doc_ids
-        self.embedder.embed_docs(doc_ids)
-
-    @timefunction
-    def rank(self, queries: list[str], top_k: int = 100) -> list[DocRanking]:
-        query_tokens = bm25s.tokenize(queries)
-
-        results_indices, scores = self.embedder.index.retrieve(query_tokens, k=top_k)
-
-        rankings = list()
-
-        for query_i, result_indices in enumerate(results_indices):
-            score_tuples = [
-                (self.doc_ids[doc_i], scores[query_i][result_i])
-                for (result_i, doc_i) in enumerate(result_indices)
-            ]
-            rankings.append(
-                DocRanking.from_tuples(queries[query_i], score_tuples, self.engine)
-            )
-
-        return rankings
-
-
-class TfIdfPageRanker:
-    def __init__(self, embedder: TfIdfPageEmbedder, indexer: TfIdfIndexer, engine: Engine):
-        self.embedder = embedder
-        self.indexer = indexer
-        self.engine = engine
-
-    @timefunction
-    def rank(self, queries: list[str], top_k: int = 100) -> list[PageRanking]:
-        query_embeddings = self.embedder.embed_queries(queries)
-        scores = self.indexer.retrieve(query_embeddings, top_k)
-        return [PageRanking.from_tuples(queries[i], scores[i], self.engine) for i in range(len(queries))]
-
-
-class BM25PageRanker:
-    def __init__(self, embedder: BM25PageEmbedder, indexer: BM25Indexer, engine: Engine):
-        self.embedder = embedder
-        self.indexer = indexer
-        self.engine = engine
-
-    @timefunction
-    def rank(self, queries: list[str], top_k: int = 100) -> list[PageRanking]:
-        query_tokens = self.embedder.embed_queries(queries)
-        scores = self.indexer.retrieve(query_tokens, top_k)
         return [PageRanking.from_tuples(queries[i], scores[i], self.engine) for i in range(len(queries))]
 
 
