@@ -21,8 +21,15 @@ A Python framework that provides a common interface for the document retrieval p
    ```
 
 2. Install dependencies:
+
+   **CPU (local development):**
    ```bash
-   uv sync
+   uv sync --extra cpu
+   ```
+
+   **CUDA 12.6 (GPU cluster):**
+   ```bash
+   uv sync --extra cu126
    ```
 
 3. Copy the example environment file and fill in your values:
@@ -31,8 +38,15 @@ A Python framework that provides a common interface for the document retrieval p
    ```
 
 4. Start the PostgreSQL database with pgvector and the application:
+
+   **Local (no GPU):**
    ```bash
    docker-compose up -d
+   ```
+
+   **GPU cluster:**
+   ```bash
+   docker-compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
    ```
 
 5. Run database migrations:
@@ -250,6 +264,13 @@ The full stack is defined in `docker-compose.yml`. Key services:
 | `annotator-frontend` | Annotation UI | 5173 |
 
 To run the test suite inside Docker:
+
+**Local (no GPU):**
 ```bash
 docker-compose --profile test up app-test
+```
+
+**GPU cluster:**
+```bash
+docker-compose -f docker-compose.yml -f docker-compose.gpu.yml --profile test up app-test
 ```

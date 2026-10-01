@@ -14,13 +14,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
 
   db:
     image: pgvector/pgvector:pg17
@@ -89,13 +82,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
 
 volumes:
   pgdata:
