@@ -13,7 +13,7 @@ The four pipeline stages are: **Preprocessing** (extract text and render page im
 - Python 3.11 or later
 - [uv](https://docs.astral.sh/uv/) (package manager)
 - Docker and Docker Compose
-- A CUDA-capable GPU (required for neural embedding models; TF-IDF and BM25 run on CPU and do not need one)
+- A CUDA-capable GPU (required for all neural embedding models; TF-IDF and BM25 run on CPU)
 - A Hugging Face account with an access token (for downloading gated models)
 - A Gemini API key (only if using System 12 — `gemini-embedding-2`)
 
@@ -30,14 +30,8 @@ The four pipeline stages are: **Preprocessing** (extract text and render page im
 
 2. Install Python dependencies:
 
-   **CPU (local development):**
    ```bash
-   uv sync --extra cpu
-   ```
-
-   **CUDA 12.6 (GPU cluster):**
-   ```bash
-   uv sync --extra cu126
+   uv sync
    ```
 
 3. Copy the example environment file:
@@ -50,17 +44,9 @@ The four pipeline stages are: **Preprocessing** (extract text and render page im
 
 5. Start the PostgreSQL database (pgvector-enabled) and the application container:
 
-   **Local (no GPU):**
    ```bash
    docker compose up -d
    ```
-
-   **GPU cluster:**
-   ```bash
-   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
-   ```
-
-   The GPU override file (`docker-compose.gpu.yml`) adds the NVIDIA device reservation and builds the image with CUDA 12.6 torch wheels.
 
 6. Run database migrations to create the schema:
 
@@ -405,20 +391,14 @@ Max     : X.X ms
 # Start the database only
 docker compose up -d db
 
-# Start everything (local, no GPU)
+# Start everything
 docker compose up -d
-
-# Start everything (GPU cluster)
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 
 # Start annotator services only
 docker compose up -d annotator-backend annotator-frontend
 
-# Run the test suite inside Docker (local)
+# Run the test suite inside Docker
 docker compose --profile test up app-test
-
-# Run the test suite inside Docker (GPU cluster)
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile test up app-test
 
 # Stop all services
 docker compose down
@@ -446,8 +426,7 @@ Tests are organized per module: `test_preprocessing.py`, `test_embedding.py`, `t
 cp .env.example .env   # fill in credentials
 
 # 2. Start services and migrate
-docker compose up -d                  # local (no GPU)
-# docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d  # GPU cluster
+docker compose up -d
 uv run alembic upgrade head
 
 # 3. Place documents

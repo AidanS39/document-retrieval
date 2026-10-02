@@ -8,13 +8,11 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /app
 
-ARG TORCH_EXTRA=cpu
-
 COPY .python-version pyproject.toml uv.lock alembic.ini service_account.json ./
 
 COPY migrations ./migrations
 
-RUN uv sync --locked --extra ${TORCH_EXTRA}
+RUN uv sync --locked
 
 COPY src/ ./src/
 
