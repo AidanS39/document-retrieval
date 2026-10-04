@@ -1,3 +1,9 @@
+export interface AnnotatorInfo {
+  id: number;
+  name: string;
+  role: string;
+}
+
 export interface Query {
   id: number;
   query: string;

@@ -63,19 +63,33 @@ html, body, #root {
   white-space: nowrap;
 }
 
-.annotator-input {
+.annotator-display {
   padding: 5px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
   color: var(--text);
   font-size: 13px;
-  width: 180px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.annotator-input:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+.sign-out-btn {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sign-out-btn:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
 }
 
 .header-spacer { flex: 1; }
@@ -638,3 +652,24 @@ kbd {
 
 .reg-submit-btn:hover:not(:disabled) { background: var(--accent-hover); }
 .reg-submit-btn:disabled { opacity: 0.4; cursor: default; }
+
+.auth-error {
+  font-size: 13px;
+  color: var(--danger);
+  line-height: 1.5;
+}
+
+.auth-link-btn {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+  text-align: center;
+}
+
+.auth-link-btn:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}

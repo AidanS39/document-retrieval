@@ -1,5 +1,6 @@
 import json
 import math
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -8,7 +9,7 @@ from sqlalchemy import select, func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from .models import EvaluationAnnotation
+from .models import Annotator, EvaluationAnnotation
 
 
 class RetrievalSystem:
@@ -136,14 +137,16 @@ class QueryPool:
 
 
 class AnnotationStore:
-    def __init__(self, engine):
+    def __init__(self, engine, role: Optional[str] = None):
         self.engine = engine
+        # When set, reads are restricted to annotators with this role ("human" or "ai")
+        self.role = role
 
-    def submit(self, annotator: str, query_id: int, query: str, page_id: int, score: int, explanation: str = ""):
+    def submit(self, annotator_id: int, query_id: int, query: str, page_id: int, score: int, explanation: str = ""):
         stmt = (
             pg_insert(EvaluationAnnotation)
             .values(
-                annotator=annotator,
+                annotator_id=annotator_id,
                 query_id=query_id,
                 query=query,
                 page_id=page_id,
@@ -151,7 +154,7 @@ class AnnotationStore:
                 explanation=explanation,
             )
             .on_conflict_do_update(
-                index_elements=["annotator", "query_id", "page_id"],
+                index_elements=["annotator_id", "query_id", "page_id"],
                 set_={"score": score, "explanation": explanation, "submitted_at": func.now()},
             )
         )
@@ -165,11 +168,17 @@ class AnnotationStore:
         before: Optional[datetime] = None,
         after: Optional[datetime] = None,
     ) -> dict[str, dict[int, int]]:
-        stmt = select(
-            EvaluationAnnotation.annotator,
-            EvaluationAnnotation.page_id,
-            EvaluationAnnotation.score,
-        ).where(EvaluationAnnotation.query_id == query_id)
+        stmt = (
+            select(
+                Annotator.name,
+                EvaluationAnnotation.page_id,
+                EvaluationAnnotation.score,
+            )
+            .join(Annotator, EvaluationAnnotation.annotator_id == Annotator.id)
+            .where(EvaluationAnnotation.query_id == query_id)
+        )
+        if self.role is not None:
+            stmt = stmt.where(Annotator.role == self.role)
         if before is not None:
             stmt = stmt.where(EvaluationAnnotation.submitted_at < before)
         if after is not None:
@@ -177,8 +186,8 @@ class AnnotationStore:
         with Session(self.engine) as session:
             rows = session.execute(stmt).all()
         result: dict[str, dict[int, int]] = {}
-        for annotator, page_id, score in rows:
-            result.setdefault(annotator, {})[page_id] = score
+        for name, page_id, score in rows:
+            result.setdefault(name, {})[page_id] = score
         return result
 
     def get_annotated_queries(
@@ -191,6 +200,11 @@ class AnnotationStore:
             EvaluationAnnotation.query,
             EvaluationAnnotation.page_id,
         ).distinct()
+        if self.role is not None:
+            stmt = (
+                stmt.join(Annotator, EvaluationAnnotation.annotator_id == Annotator.id)
+                .where(Annotator.role == self.role)
+            )
         if before is not None:
             stmt = stmt.where(EvaluationAnnotation.submitted_at < before)
         if after is not None:
@@ -205,10 +219,11 @@ class AnnotationStore:
         return sorted(queries.values(), key=lambda q: q["query_id"])
 
     def get_all_annotators(self) -> list[str]:
+        stmt = select(Annotator.name)
+        if self.role is not None:
+            stmt = stmt.where(Annotator.role == self.role)
         with Session(self.engine) as session:
-            return list(session.execute(
-                select(EvaluationAnnotation.annotator).distinct()
-            ).scalars().all())
+            return list(session.execute(stmt).scalars().all())
 
     def is_complete(self, pool: QueryPool, annotator: str) -> bool:
         for q in pool.queries:
@@ -235,8 +250,14 @@ class NDCGComputer:
         for page_id in pooled_page_ids:
             scores = [ann[page_id] for ann in annotations.values() if page_id in ann]
             if scores:
-                avg = sum(scores) / len(scores)
-                result[page_id] = float(round(avg)) if aggregate == "majority" else avg
+                if aggregate == "majority":
+                    # Mode of the scores; on a tie, average the tied scores
+                    counts = Counter(scores)
+                    top = max(counts.values())
+                    modes = [s for s, c in counts.items() if c == top]
+                    result[page_id] = sum(modes) / len(modes)
+                else:
+                    result[page_id] = sum(scores) / len(scores)
             else:
                 result[page_id] = 0.0
         return result

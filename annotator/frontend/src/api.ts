@@ -1,4 +1,4 @@
-import type { Query, PageInfo, Score, Scores, QueryCompletion } from './types';
+import type { AnnotatorInfo, Query, PageInfo, Score, Scores, QueryCompletion } from './types';
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, options);
@@ -7,20 +7,30 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
+export const fetchAnnotatorByName = (name: string): Promise<AnnotatorInfo> =>
+  request(`/api/annotators/by-name/${encodeURIComponent(name)}`);
+
+export const createAnnotator = (name: string): Promise<AnnotatorInfo> =>
+  request('/api/annotators', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+
 export const fetchQueries = (): Promise<Query[]> =>
   request('/api/queries');
 
 export const fetchPages = (queryId: number): Promise<PageInfo[]> =>
   request(`/api/queries/${queryId}/pages`);
 
-export const fetchAnnotations = (annotator: string, queryId: number): Promise<Scores> =>
-  request(`/api/annotations/${encodeURIComponent(annotator)}/${queryId}`);
+export const fetchAnnotations = (annotatorId: number, queryId: number): Promise<Scores> =>
+  request(`/api/annotations/${annotatorId}/${queryId}`);
 
-export const fetchStatus = (annotator: string): Promise<QueryCompletion> =>
-  request(`/api/status/${encodeURIComponent(annotator)}`);
+export const fetchStatus = (annotatorId: number): Promise<QueryCompletion> =>
+  request(`/api/status/${annotatorId}`);
 
 export const submitAnnotation = (
-  annotator: string,
+  annotatorId: number,
   queryId: number,
   pageId: number,
   score: Score,
@@ -28,15 +38,15 @@ export const submitAnnotation = (
   request('/api/annotations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ annotator, query_id: queryId, page_id: pageId, score }),
+    body: JSON.stringify({ annotator_id: annotatorId, query_id: queryId, page_id: pageId, score }),
   });
 
 export const clearAnnotation = (
-  annotator: string,
+  annotatorId: number,
   queryId: number,
   pageId: number,
 ): Promise<void> =>
-  request(`/api/annotations/${encodeURIComponent(annotator)}/${queryId}/${pageId}`, {
+  request(`/api/annotations/${annotatorId}/${queryId}/${pageId}`, {
     method: 'DELETE',
   });
 

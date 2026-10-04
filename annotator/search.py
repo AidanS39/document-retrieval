@@ -76,7 +76,7 @@ def cmd_queries(args, pool, engine):
 # ── pages ─────────────────────────────────────────────────────────────────────
 
 def _data_pages_for_entry(entry, engine):
-    from document_retrieval.models import Document, EvaluationAnnotation, Page
+    from document_retrieval.models import Annotator, Document, EvaluationAnnotation, Page
 
     page_ids = entry["pooled_page_ids"]
     with Session(engine) as session:
@@ -87,16 +87,18 @@ def _data_pages_for_entry(entry, engine):
         ).all()
         ann_rows = session.execute(
             select(
-                EvaluationAnnotation.annotator,
+                Annotator.name,
                 EvaluationAnnotation.page_id,
                 EvaluationAnnotation.score,
-            ).where(EvaluationAnnotation.query_id == entry["id"])
+            )
+            .join(Annotator, EvaluationAnnotation.annotator_id == Annotator.id)
+            .where(EvaluationAnnotation.query_id == entry["id"])
         ).all()
 
     page_map = {r.id: r for r in page_rows}
     ann_map: dict[int, dict[str, int]] = {}
-    for annotator, page_id, score in ann_rows:
-        ann_map.setdefault(page_id, {})[annotator] = score
+    for name, page_id, score in ann_rows:
+        ann_map.setdefault(page_id, {})[name] = score
 
     pages = []
     for pid in page_ids:
@@ -155,7 +157,7 @@ def cmd_pages(args, pool, engine):
 # ── annotations ───────────────────────────────────────────────────────────────
 
 def _data_annotations(args, pool, engine):
-    from document_retrieval.models import Document, EvaluationAnnotation, Page
+    from document_retrieval.models import Annotator, Document, EvaluationAnnotation, Page
 
     # Detailed view: specific annotator + query, includes unannotated pool pages
     if args.annotator is not None and args.query_id is not None:
@@ -170,8 +172,10 @@ def _data_annotations(args, pool, engine):
                     EvaluationAnnotation.page_id,
                     EvaluationAnnotation.score,
                     EvaluationAnnotation.submitted_at,
-                ).where(
-                    EvaluationAnnotation.annotator == args.annotator,
+                )
+                .join(Annotator, EvaluationAnnotation.annotator_id == Annotator.id)
+                .where(
+                    Annotator.name == args.annotator,
                     EvaluationAnnotation.query_id == args.query_id,
                 )
             ).all()
@@ -219,20 +223,23 @@ def _data_annotations(args, pool, engine):
 
     # Flat list: filter by annotator and/or query_id if provided
     with Session(engine) as session:
-        stmt = select(
-            EvaluationAnnotation.annotator,
-            EvaluationAnnotation.query_id,
-            EvaluationAnnotation.query,
-            EvaluationAnnotation.page_id,
-            EvaluationAnnotation.score,
-            EvaluationAnnotation.submitted_at,
+        stmt = (
+            select(
+                Annotator.name,
+                EvaluationAnnotation.query_id,
+                EvaluationAnnotation.query,
+                EvaluationAnnotation.page_id,
+                EvaluationAnnotation.score,
+                EvaluationAnnotation.submitted_at,
+            )
+            .join(Annotator, EvaluationAnnotation.annotator_id == Annotator.id)
         )
         if args.annotator is not None:
-            stmt = stmt.where(EvaluationAnnotation.annotator == args.annotator)
+            stmt = stmt.where(Annotator.name == args.annotator)
         if args.query_id is not None:
             stmt = stmt.where(EvaluationAnnotation.query_id == args.query_id)
         ann_rows = session.execute(stmt.order_by(
-            EvaluationAnnotation.annotator,
+            Annotator.name,
             EvaluationAnnotation.query_id,
             EvaluationAnnotation.page_id,
         )).all()
@@ -247,7 +254,7 @@ def _data_annotations(args, pool, engine):
     page_map = {r.id: r for r in page_rows}
     return [
         {
-            "annotator": r.annotator,
+            "annotator": r.name,
             "query_id": r.query_id,
             "query": r.query,
             "page_id": r.page_id,
@@ -304,24 +311,27 @@ def cmd_annotations(args, pool, engine):
 # ── status ────────────────────────────────────────────────────────────────────
 
 def _data_status(args, pool, engine):
-    from document_retrieval.models import EvaluationAnnotation
+    from document_retrieval.models import Annotator, EvaluationAnnotation
 
     pool_ids_by_query = {q["id"]: set(q["pooled_page_ids"]) for q in pool.queries}
     total_slots = sum(len(ids) for ids in pool_ids_by_query.values())
 
     with Session(engine) as session:
-        stmt = select(
-            EvaluationAnnotation.annotator,
-            EvaluationAnnotation.query_id,
-            EvaluationAnnotation.page_id,
+        stmt = (
+            select(
+                Annotator.name,
+                EvaluationAnnotation.query_id,
+                EvaluationAnnotation.page_id,
+            )
+            .join(Annotator, EvaluationAnnotation.annotator_id == Annotator.id)
         )
         if args.annotator:
-            stmt = stmt.where(EvaluationAnnotation.annotator == args.annotator)
+            stmt = stmt.where(Annotator.name == args.annotator)
         rows = session.execute(stmt).all()
 
     by_annotator: dict[str, dict[int, set[int]]] = {}
-    for annotator, query_id, page_id in rows:
-        by_annotator.setdefault(annotator, {}).setdefault(query_id, set()).add(page_id)
+    for name, query_id, page_id in rows:
+        by_annotator.setdefault(name, {}).setdefault(query_id, set()).add(page_id)
 
     query_map = {q["id"]: q["query"] for q in pool.queries}
     result = []

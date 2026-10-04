@@ -59,33 +59,32 @@ def _load_pool(pool_path: Path):
     return QueryPool.import_from_json(pool_path)
 
 
-def _load_existing(engine, annotator: str) -> set[tuple[int, int]]:
+def _load_existing(engine, annotator_id: int) -> set[tuple[int, int]]:
     from document_retrieval.models import EvaluationAnnotation
     with Session(engine) as session:
         rows = session.execute(
             select(EvaluationAnnotation.query_id, EvaluationAnnotation.page_id)
-            .where(EvaluationAnnotation.annotator == annotator)
+            .where(EvaluationAnnotation.annotator_id == annotator_id)
         ).all()
     return {(r.query_id, r.page_id) for r in rows}
 
 
 def _build_agent(model: str) -> Agent:
-    pydantic_model = model
+    base_url = os.getenv("LLM_BASE_URL")
+    auth_token = os.getenv("LLM_AUTH_TOKEN")
 
-    base_url = os.getenv("ANTHROPIC_BASE_URL")
-    if base_url and model.startswith("anthropic:"):
-        import anthropic
-        from pydantic_ai.models.anthropic import AnthropicModel
-        from pydantic_ai.providers.anthropic import AnthropicProvider
+    if base_url and auth_token:
+        from pydantic_ai.models.openai import OpenAIChatModel
+        from pydantic_ai.profiles.openai import OpenAIModelProfile
+        from pydantic_ai.providers.litellm import LiteLLMProvider
 
-        client = anthropic.AsyncAnthropic(
-            api_key=os.getenv("ANTHROPIC_AUTH_TOKEN") or os.getenv("ANTHROPIC_API_KEY"),
-            base_url=base_url,
+        pydantic_model = OpenAIChatModel(
+            model,
+            provider=LiteLLMProvider(api_base=base_url, api_key=auth_token),
+            profile=OpenAIModelProfile(openai_supports_tool_choice_required=False),
         )
-        pydantic_model = AnthropicModel(
-            model.removeprefix("anthropic:"),
-            provider=AnthropicProvider(anthropic_client=client),
-        )
+    else:
+        pydantic_model = model
 
     return Agent(
         pydantic_model,
@@ -195,9 +194,22 @@ def main():
     engine = _build_engine()
     pool = _load_pool(args.pool)
 
+    from document_retrieval.models import Annotator
+    with Session(engine) as session:
+        annotator_obj = session.execute(
+            select(Annotator).where(Annotator.name == annotator_name)
+        ).scalar_one_or_none()
+        if annotator_obj is None:
+            annotator_obj = Annotator(name=annotator_name, role="ai")
+            session.add(annotator_obj)
+            session.commit()
+            session.refresh(annotator_obj)
+            print(f"Registered new annotator '{annotator_name}' (role=ai)")
+    annotator_id = annotator_obj.id
+
     existing: set[tuple[int, int]] = set()
     if args.skip_existing:
-        existing = _load_existing(engine, annotator_name)
+        existing = _load_existing(engine, annotator_id)
         print(f"Loaded {len(existing)} existing annotations for '{annotator_name}'")
 
     agent = _build_agent(args.model)
@@ -236,7 +248,7 @@ def main():
 
             annotation = _annotate_page(agent, query_text, page.image_path)
             if not args.no_store:
-                store.submit(annotator_name, query_id, query_text, page_id, annotation.relevance, annotation.explanation)
+                store.submit(annotator_id, query_id, query_text, page_id, annotation.relevance, annotation.explanation)
             annotations_done += 1
             print(f"query={query_id} page={page_id} score={annotation.relevance}  {annotation.explanation}")
 

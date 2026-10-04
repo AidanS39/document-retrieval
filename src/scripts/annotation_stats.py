@@ -50,7 +50,14 @@ def main():
         default="mean",
         help="How to aggregate annotator scores into gold scores (default: mean)",
     )
+    parser.add_argument(
+        "--annotators",
+        choices=["all", "human", "ai"],
+        default="all",
+        help="Restrict all statistics to human annotators, AI annotators, or both (default: all)",
+    )
     args = parser.parse_args()
+    role = None if args.annotators == "all" else args.annotators
 
     conn_url = URL.create(
         drivername=os.getenv("DB_DRIVER", "postgresql"),
@@ -62,37 +69,46 @@ def main():
     )
     engine = create_engine(conn_url)
 
-    from document_retrieval.models import EvaluationAnnotation, EvaluationNote
+    from document_retrieval.models import Annotator, EvaluationAnnotation, EvaluationNote
+
+    annotation_stmt = (
+        select(
+            Annotator.name,
+            EvaluationAnnotation.query_id,
+            EvaluationAnnotation.query,
+            EvaluationAnnotation.page_id,
+            EvaluationAnnotation.score,
+            EvaluationAnnotation.submitted_at,
+        )
+        .join(Annotator, EvaluationAnnotation.annotator_id == Annotator.id)
+    )
+    note_stmt = select(
+        EvaluationNote.annotator,
+        EvaluationNote.query_id,
+        EvaluationNote.note,
+    ).where(EvaluationNote.note != "")
+    if role is not None:
+        annotation_stmt = annotation_stmt.where(Annotator.role == role)
+        # EvaluationNote stores the annotator by name rather than by id
+        note_stmt = (
+            note_stmt.join(Annotator, EvaluationNote.annotator == Annotator.name)
+            .where(Annotator.role == role)
+        )
 
     with Session(engine) as session:
-        rows = session.execute(
-            select(
-                EvaluationAnnotation.annotator,
-                EvaluationAnnotation.query_id,
-                EvaluationAnnotation.query,
-                EvaluationAnnotation.page_id,
-                EvaluationAnnotation.score,
-                EvaluationAnnotation.submitted_at,
-            )
-        ).all()
-
-        note_rows = session.execute(
-            select(
-                EvaluationNote.annotator,
-                EvaluationNote.query_id,
-                EvaluationNote.note,
-            ).where(EvaluationNote.note != "")
-        ).all()
+        rows = session.execute(annotation_stmt).all()
+        note_rows = session.execute(note_stmt).all()
 
     if not rows:
-        print("No annotations found in the database.")
+        scope = "" if role is None else f" from {role} annotators"
+        print(f"No annotations found in the database{scope}.")
         return
 
     # Build data structures
     by_annotator: dict[str, list[tuple]] = defaultdict(list)
     by_query: dict[int, dict] = {}
     score_counts: dict[int, int] = defaultdict(int)
-    page_annotator_scores: dict[int, dict[str, int]] = defaultdict(dict)
+    page_annotator_scores: dict[tuple[int, int], dict[str, int]] = defaultdict(dict)
 
     for annotator, query_id, query, page_id, score, submitted_at in rows:
         by_annotator[annotator].append((query_id, page_id, score))
@@ -100,7 +116,7 @@ def main():
             by_query[query_id] = {"query": query, "annotations": []}
         by_query[query_id]["annotations"].append((annotator, page_id, score))
         score_counts[score] += 1
-        page_annotator_scores[page_id][annotator] = score
+        page_annotator_scores[(query_id, page_id)][annotator] = score
 
     total = len(rows)
     annotators = sorted(by_annotator.keys())
@@ -110,10 +126,11 @@ def main():
     hr()
     print("  Annotation Statistics")
     hr()
+    print(f"  Annotator filter   : {args.annotators}")
     print(f"  Total annotations  : {total}")
     print(f"  Unique annotators  : {len(annotators)}")
     print(f"  Unique queries     : {len(by_query)}")
-    print(f"  Unique pages       : {len(set(r[3] for r in rows))}")
+    print(f"  Unique pages       : {len(set((r[1], r[3]) for r in rows))}")
     print()
     print("  Score Distribution:")
     for score_val in range(4):
@@ -129,7 +146,7 @@ def main():
     for annotator in annotators:
         anns = by_annotator[annotator]
         queries_done = len(set(a[0] for a in anns))
-        pages_done = len(set(a[1] for a in anns))
+        pages_done = len(set((a[0], a[1]) for a in anns))
         sc: dict[int, int] = defaultdict(int)
         for _, _, s in anns:
             sc[s] += 1
@@ -152,7 +169,7 @@ def main():
 
     # === Inter-Annotator Agreement ===
     section("Inter-Annotator Agreement")
-    multi_pages = {pid: scores for pid, scores in page_annotator_scores.items() if len(scores) >= 2}
+    multi_pages = {key: scores for key, scores in page_annotator_scores.items() if len(scores) >= 2}
     if multi_pages:
         diffs: list[int] = []
         for scores in multi_pages.values():
@@ -259,7 +276,7 @@ def main():
         from document_retrieval.evaluation import AnnotationStore, NDCGComputer
         section(f"Best System per Query  (NDCG@{args.k}, {args.aggregate} aggregate)")
 
-        store = AnnotationStore(engine)
+        store = AnnotationStore(engine, role=role)
         computer = NDCGComputer(store)
         results = computer.compute(pool, systems, k=args.k, aggregate=args.aggregate)
 

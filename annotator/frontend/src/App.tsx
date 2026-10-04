@@ -1,18 +1,27 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Query, PageInfo, Score, Scores, QueryCompletion } from './types';
-import { fetchQueries, fetchPages, fetchAnnotations, fetchStatus, submitAnnotation, clearAnnotation, fetchNote, submitNote } from './api';
+import { fetchQueries, fetchPages, fetchAnnotations, fetchStatus, submitAnnotation, clearAnnotation, fetchNote, submitNote, fetchAnnotatorByName, createAnnotator } from './api';
 import Header from './components/Header';
 import LeftPanel from './components/LeftPanel';
 import PDFViewer from './components/PDFViewer';
 import Footer from './components/Footer';
 
 export default function App() {
-  const [annotator, setAnnotatorRaw] = useState<string>(
-    () => localStorage.getItem('annotator') ?? ''
+  const [annotatorId, setAnnotatorId] = useState<number | null>(() => {
+    const stored = localStorage.getItem('annotatorId');
+    return stored ? parseInt(stored, 10) : null;
+  });
+  const [annotatorName, setAnnotatorName] = useState<string>(
+    () => localStorage.getItem('annotatorName') ?? ''
   );
-  const [showReg, setShowReg] = useState(() => !localStorage.getItem('annotator')?.trim());
-  const [regName, setRegName] = useState('');
-  const regInputRef = useRef<HTMLInputElement>(null);
+  const [showSignIn, setShowSignIn] = useState(() => !localStorage.getItem('annotatorId'));
+  const [showCreate, setShowCreate] = useState(false);
+  const [signInName, setSignInName] = useState('');
+  const [signInError, setSignInError] = useState('');
+  const [createName, setCreateName] = useState('');
+  const [createError, setCreateError] = useState('');
+  const signInInputRef = useRef<HTMLInputElement>(null);
+  const createInputRef = useRef<HTMLInputElement>(null);
   const [queries, setQueries] = useState<Query[]>([]);
   const [queryIndex, setQueryIndex] = useState(0);
   const [pages, setPages] = useState<PageInfo[]>([]);
@@ -24,21 +33,68 @@ export default function App() {
   const [note, setNote] = useState('');
   const noteSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const setAnnotator = (name: string) => {
-    setAnnotatorRaw(name);
-    localStorage.setItem('annotator', name);
-  };
-
-  const submitReg = () => {
-    const name = regName.trim();
-    if (!name) return;
-    setAnnotator(name);
-    setShowReg(false);
-  };
+  useEffect(() => {
+    if (showSignIn && !showCreate) signInInputRef.current?.focus();
+  }, [showSignIn, showCreate]);
 
   useEffect(() => {
-    if (showReg) regInputRef.current?.focus();
-  }, [showReg]);
+    if (showCreate) createInputRef.current?.focus();
+  }, [showCreate]);
+
+  const signIn = async () => {
+    const name = signInName.trim();
+    if (!name) return;
+    try {
+      const info = await fetchAnnotatorByName(name);
+      localStorage.setItem('annotatorId', String(info.id));
+      localStorage.setItem('annotatorName', info.name);
+      setAnnotatorId(info.id);
+      setAnnotatorName(info.name);
+      setShowSignIn(false);
+      setSignInError('');
+      setSignInName('');
+    } catch {
+      setSignInError(`No annotator found with name "${name}".`);
+    }
+  };
+
+  const openCreate = () => {
+    setCreateName(signInName.trim());
+    setCreateError('');
+    setShowCreate(true);
+  };
+
+  const createAccount = async () => {
+    const name = createName.trim();
+    if (!name) return;
+    try {
+      const info = await createAnnotator(name);
+      localStorage.setItem('annotatorId', String(info.id));
+      localStorage.setItem('annotatorName', info.name);
+      setAnnotatorId(info.id);
+      setAnnotatorName(info.name);
+      setShowCreate(false);
+      setShowSignIn(false);
+      setCreateError('');
+      setCreateName('');
+    } catch {
+      setCreateError(`An annotator named "${createName.trim()}" already exists.`);
+    }
+  };
+
+  const signOut = () => {
+    localStorage.removeItem('annotatorId');
+    localStorage.removeItem('annotatorName');
+    setAnnotatorId(null);
+    setAnnotatorName('');
+    setShowSignIn(true);
+    setShowCreate(false);
+    setScores({});
+    setQueryCompletion({});
+    setNote('');
+    setSignInName('');
+    setSignInError('');
+  };
 
   // Load query list once on mount
   useEffect(() => {
@@ -47,11 +103,11 @@ export default function App() {
       .catch(() => { setPoolMissing(true); setLoading(false); });
   }, []);
 
-  // Reload per-annotator completion status when annotator name changes
+  // Reload per-annotator completion status when annotator changes
   useEffect(() => {
-    if (!annotator.trim()) { setQueryCompletion({}); return; }
-    fetchStatus(annotator).then(setQueryCompletion);
-  }, [annotator]);
+    if (!annotatorId) { setQueryCompletion({}); return; }
+    fetchStatus(annotatorId).then(setQueryCompletion);
+  }, [annotatorId]);
 
   const currentQuery = queries[queryIndex] ?? null;
 
@@ -65,37 +121,36 @@ export default function App() {
 
   // Load existing scores when query or annotator changes
   useEffect(() => {
-    if (!currentQuery || !annotator.trim()) { setScores({}); return; }
-    fetchAnnotations(annotator, currentQuery.id).then(existing => {
+    if (!currentQuery || !annotatorId) { setScores({}); return; }
+    fetchAnnotations(annotatorId, currentQuery.id).then(existing => {
       setScores(existing as Scores);
-      // Sync completion count from loaded data
       setQueryCompletion(prev => ({
         ...prev,
         [currentQuery.id]: Object.keys(existing).length,
       }));
     });
-  }, [currentQuery?.id, annotator]);
+  }, [currentQuery?.id, annotatorId]);
 
   // Load note when query or annotator changes
   useEffect(() => {
     if (noteSaveTimer.current) { clearTimeout(noteSaveTimer.current); noteSaveTimer.current = null; }
-    if (!currentQuery || !annotator.trim()) { setNote(''); return; }
-    fetchNote(annotator, currentQuery.id).then(({ note: n }) => setNote(n));
-  }, [currentQuery?.id, annotator]);
+    if (!currentQuery || !annotatorName) { setNote(''); return; }
+    fetchNote(annotatorName, currentQuery.id).then(({ note: n }) => setNote(n));
+  }, [currentQuery?.id, annotatorName]);
 
   const handleNoteChange = useCallback((text: string) => {
     setNote(text);
-    if (!currentQuery || !annotator.trim()) return;
+    if (!currentQuery || !annotatorName) return;
     if (noteSaveTimer.current) clearTimeout(noteSaveTimer.current);
     noteSaveTimer.current = setTimeout(() => {
-      submitNote(annotator, currentQuery.id, text);
+      submitNote(annotatorName, currentQuery.id, text);
     }, 600);
-  }, [annotator, currentQuery]);
+  }, [annotatorName, currentQuery]);
 
   const focusedPage = pages[focusedPageIdx] ?? null;
 
   const score = useCallback((s: Score) => {
-    if (!focusedPage || !annotator.trim() || !currentQuery) return;
+    if (!focusedPage || !annotatorId || !currentQuery) return;
     const pageId = focusedPage.page_id;
 
     setScores(prev => {
@@ -107,9 +162,8 @@ export default function App() {
       return next;
     });
 
-    submitAnnotation(annotator, currentQuery.id, pageId, s);
+    submitAnnotation(annotatorId, currentQuery.id, pageId, s);
 
-    // Advance focus to next unscored page, or just the next page
     setFocusedPageIdx(idx => {
       const nextUnscored = pages.findIndex(
         (p, i) => i > idx && scores[p.page_id] === undefined && p.page_id !== pageId
@@ -117,10 +171,10 @@ export default function App() {
       if (nextUnscored !== -1) return nextUnscored;
       return Math.min(idx + 1, pages.length - 1);
     });
-  }, [focusedPage, annotator, currentQuery, pages, scores]);
+  }, [focusedPage, annotatorId, currentQuery, pages, scores]);
 
   const clear = useCallback((pageId: number) => {
-    if (!annotator.trim() || !currentQuery) return;
+    if (!annotatorId || !currentQuery) return;
     setScores(prev => {
       const next = { ...prev };
       delete next[pageId];
@@ -130,8 +184,8 @@ export default function App() {
       }));
       return next;
     });
-    clearAnnotation(annotator, currentQuery.id, pageId);
-  }, [annotator, currentQuery]);
+    clearAnnotation(annotatorId, currentQuery.id, pageId);
+  }, [annotatorId, currentQuery]);
 
   const goToQuery = useCallback((idx: number) => {
     setQueryIndex(Math.max(0, Math.min(idx, queries.length - 1)));
@@ -177,29 +231,57 @@ export default function App() {
 
   return (
     <div className="app">
-      {showReg && (
+      {showSignIn && !showCreate && (
         <div className="reg-backdrop">
           <div className="reg-modal">
-            <div className="reg-modal-title">Welcome to Annotator</div>
-            <p className="reg-modal-desc">Enter your name to begin annotating.</p>
+            <div className="reg-modal-title">Sign in</div>
+            <p className="reg-modal-desc">Enter your name to continue annotating.</p>
             <input
-              ref={regInputRef}
+              ref={signInInputRef}
               className="reg-input"
               type="text"
               placeholder="Your name"
-              value={regName}
-              onChange={e => setRegName(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') submitReg(); }}
+              value={signInName}
+              onChange={e => { setSignInName(e.target.value); setSignInError(''); }}
+              onKeyDown={e => { if (e.key === 'Enter') signIn(); }}
             />
-            <button className="reg-submit-btn" onClick={submitReg} disabled={!regName.trim()}>
-              Start annotating
+            {signInError && <p className="auth-error">{signInError}</p>}
+            <button className="reg-submit-btn" onClick={signIn} disabled={!signInName.trim()}>
+              Sign in
+            </button>
+            <button className="auth-link-btn" onClick={openCreate}>
+              Create an account
+            </button>
+          </div>
+        </div>
+      )}
+      {showCreate && (
+        <div className="reg-backdrop">
+          <div className="reg-modal">
+            <div className="reg-modal-title">Create account</div>
+            <p className="reg-modal-desc">Choose a name to register as a new annotator.</p>
+            <input
+              ref={createInputRef}
+              className="reg-input"
+              type="text"
+              placeholder="Your name"
+              value={createName}
+              onChange={e => { setCreateName(e.target.value); setCreateError(''); }}
+              onKeyDown={e => { if (e.key === 'Enter') createAccount(); }}
+            />
+            {createError && <p className="auth-error">{createError}</p>}
+            <button className="reg-submit-btn" onClick={createAccount} disabled={!createName.trim()}>
+              Create account
+            </button>
+            <button className="auth-link-btn" onClick={() => { setShowCreate(false); setCreateError(''); }}>
+              Back to sign in
             </button>
           </div>
         </div>
       )}
       <Header
-        annotator={annotator}
-        onAnnotatorChange={setAnnotator}
+        annotator={annotatorName}
+        onSignOut={signOut}
         queryIndex={queryIndex}
         totalQueries={queries.length}
         queryComplete={queryComplete}
@@ -212,7 +294,7 @@ export default function App() {
           focusedPageIdx={focusedPageIdx}
           onFocus={setFocusedPageIdx}
           onScore={(pageId, s) => {
-            if (!annotator.trim() || !currentQuery) return;
+            if (!annotatorId || !currentQuery) return;
             setScores(prev => {
               const next = { ...prev, [pageId]: s };
               setQueryCompletion(qc => ({
@@ -221,7 +303,7 @@ export default function App() {
               }));
               return next;
             });
-            submitAnnotation(annotator, currentQuery.id, pageId, s);
+            submitAnnotation(annotatorId, currentQuery.id, pageId, s);
           }}
           onClear={clear}
           note={note}

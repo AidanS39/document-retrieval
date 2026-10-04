@@ -9,15 +9,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import URL, create_engine
 from sqlalchemy.orm import Session
 
 # Allow importing document_retrieval from the project src directory
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from document_retrieval.evaluation import AnnotationStore, QueryPool
-from document_retrieval.models import Document, EvaluationAnnotation, EvaluationNote, Page
+from document_retrieval.evaluation import QueryPool
+from document_retrieval.models import Annotator, Document, EvaluationAnnotation, EvaluationNote, Page
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
@@ -34,14 +35,12 @@ conn_url = URL.create(
 )
 
 pool: QueryPool | None = None
-store: AnnotationStore | None = None
 engine = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global pool, store, engine
+    global pool, engine
     engine = create_engine(conn_url)
-    store = AnnotationStore(engine)
     pool_path = EVAL_DIR / "query_pool.json"
     if pool_path.exists():
         pool = QueryPool.import_from_json(pool_path)
@@ -63,7 +62,7 @@ app.add_middleware(
 
 
 class AnnotationRequest(BaseModel):
-    annotator: str
+    annotator_id: int
     query_id: int
     page_id: int
     score: int
@@ -73,6 +72,36 @@ class NoteRequest(BaseModel):
     annotator: str
     query_id: int
     note: str
+
+
+class CreateAnnotatorRequest(BaseModel):
+    name: str
+
+
+@app.get("/api/annotators/by-name/{name}")
+def get_annotator_by_name(name: str):
+    with Session(engine) as session:
+        annotator = session.execute(
+            select(Annotator).where(Annotator.name == name)
+        ).scalar_one_or_none()
+    if annotator is None:
+        raise HTTPException(404, f"No annotator with name '{name}'")
+    return {"id": annotator.id, "name": annotator.name, "role": annotator.role}
+
+
+@app.post("/api/annotators", status_code=201)
+def create_annotator(req: CreateAnnotatorRequest):
+    with Session(engine) as session:
+        existing = session.execute(
+            select(Annotator).where(Annotator.name == req.name)
+        ).scalar_one_or_none()
+        if existing is not None:
+            raise HTTPException(409, f"Annotator '{req.name}' already exists")
+        new_annotator = Annotator(name=req.name, role="human")
+        session.add(new_annotator)
+        session.commit()
+        session.refresh(new_annotator)
+    return {"id": new_annotator.id, "name": new_annotator.name, "role": new_annotator.role}
 
 
 @app.get("/api/queries")
@@ -115,16 +144,23 @@ def get_query_pages(query_id: int):
     ]
 
 
-@app.get("/api/annotations/{annotator}/{query_id}")
-def get_annotations(annotator: str, query_id: int):
+@app.get("/api/annotations/{annotator_id}/{query_id}")
+def get_annotations(annotator_id: int, query_id: int):
     if pool is None:
         raise HTTPException(503, "Query pool not loaded")
     entry = next((q for q in pool.queries if q["id"] == query_id), None)
     if entry is None:
         raise HTTPException(404, f"Query {query_id} not found")
     pool_page_ids = set(entry["pooled_page_ids"])
-    annotations = store.get_annotations(query_id)
-    return {pid: score for pid, score in annotations.get(annotator, {}).items() if pid in pool_page_ids}
+    with Session(engine) as session:
+        rows = session.execute(
+            select(EvaluationAnnotation.page_id, EvaluationAnnotation.score)
+            .where(
+                EvaluationAnnotation.annotator_id == annotator_id,
+                EvaluationAnnotation.query_id == query_id,
+            )
+        ).all()
+    return {page_id: score for page_id, score in rows if page_id in pool_page_ids}
 
 
 @app.post("/api/annotations", status_code=204)
@@ -136,15 +172,31 @@ def submit_annotation(req: AnnotationRequest):
     entry = next((q for q in pool.queries if q["id"] == req.query_id), None)
     if entry is None:
         raise HTTPException(404, f"Query {req.query_id} not found")
-    store.submit(req.annotator, req.query_id, entry["query"], req.page_id, req.score)
+    stmt = (
+        pg_insert(EvaluationAnnotation)
+        .values(
+            annotator_id=req.annotator_id,
+            query_id=req.query_id,
+            query=entry["query"],
+            page_id=req.page_id,
+            score=req.score,
+        )
+        .on_conflict_do_update(
+            index_elements=["annotator_id", "query_id", "page_id"],
+            set_={"score": req.score, "submitted_at": func.now()},
+        )
+    )
+    with Session(engine) as session:
+        session.execute(stmt)
+        session.commit()
 
 
-@app.delete("/api/annotations/{annotator}/{query_id}/{page_id}", status_code=204)
-def delete_annotation(annotator: str, query_id: int, page_id: int):
+@app.delete("/api/annotations/{annotator_id}/{query_id}/{page_id}", status_code=204)
+def delete_annotation(annotator_id: int, query_id: int, page_id: int):
     with Session(engine) as session:
         session.execute(
             delete(EvaluationAnnotation).where(
-                EvaluationAnnotation.annotator == annotator,
+                EvaluationAnnotation.annotator_id == annotator_id,
                 EvaluationAnnotation.query_id == query_id,
                 EvaluationAnnotation.page_id == page_id,
             )
@@ -152,8 +204,8 @@ def delete_annotation(annotator: str, query_id: int, page_id: int):
         session.commit()
 
 
-@app.get("/api/status/{annotator}")
-def get_annotator_status(annotator: str):
+@app.get("/api/status/{annotator_id}")
+def get_annotator_status(annotator_id: int):
     """Returns {query_id: annotated_page_count} for the given annotator, counting only pool pages."""
     if pool is None:
         return {}
@@ -161,7 +213,7 @@ def get_annotator_status(annotator: str):
     with Session(engine) as session:
         rows = session.execute(
             select(EvaluationAnnotation.query_id, EvaluationAnnotation.page_id)
-            .where(EvaluationAnnotation.annotator == annotator)
+            .where(EvaluationAnnotation.annotator_id == annotator_id)
         ).all()
     counts: dict[int, int] = {}
     for row in rows:

@@ -294,7 +294,7 @@ uv run python src/scripts/compute_ndcg.py --k 10
 | Flag | Description |
 |------|-------------|
 | `--k` | Cutoff for NDCG@k (default: 10) |
-| `--aggregate` | How to merge multiple annotators' scores: `mean` or `majority` (default: `mean`) |
+| `--aggregate` | How to merge multiple annotators' scores: `mean` or `majority` (most common score; ties are averaged) (default: `mean`) |
 | `--pool` | Path to `query_pool.json`; if omitted, reads annotations directly from the database |
 | `--systems-dir` | Directory with `system_*.json` files |
 | `--out` | Output directory for results (default: `$DATA_DIR/evaluation/results`) |

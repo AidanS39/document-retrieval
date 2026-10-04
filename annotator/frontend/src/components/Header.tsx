@@ -9,7 +9,7 @@ const SCORE_DESCRIPTIONS = [
 
 interface HeaderProps {
   annotator: string;
-  onAnnotatorChange: (name: string) => void;
+  onSignOut: () => void;
   queryIndex: number;
   totalQueries: number;
   queryComplete: boolean;
@@ -17,7 +17,7 @@ interface HeaderProps {
 
 export default function Header({
   annotator,
-  onAnnotatorChange,
+  onSignOut,
   queryIndex,
   totalQueries,
   queryComplete,
@@ -43,13 +43,8 @@ export default function Header({
     <>
       <header className="header">
         <span className="header-title">Annotator</span>
-        <input
-          className="annotator-input"
-          type="text"
-          placeholder="Your name…"
-          value={annotator}
-          onChange={e => onAnnotatorChange(e.target.value)}
-        />
+        <span className="annotator-display">{annotator}</span>
+        <button className="sign-out-btn" onClick={onSignOut}>Sign out</button>
         <button className="info-btn" onClick={() => setShowInfo(true)} title="Annotation guide">
           ?
         </button>
@@ -85,7 +80,7 @@ export default function Header({
               <div className="info-section">
                 <div className="info-section-title">How to annotate</div>
                 <ol className="info-steps">
-                  <li>Enter your name in the annotator field in the header.</li>
+                  <li>Sign in with your name using the sign-in screen.</li>
                   <li>Read the query shown at the top of the left panel.</li>
                   <li>Click a page entry to open it in the PDF viewer on the right.</li>
                   <li>Score it using the 0–3 buttons or press the corresponding number key.</li>

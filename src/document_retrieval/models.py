@@ -60,11 +60,10 @@ class Page(Base):
     )
 
 
-
 class EvaluationAnnotation(Base):
     __tablename__ = "evaluation_annotation"
     id: Mapped[int] = mapped_column(primary_key=True)
-    annotator: Mapped[str]
+    annotator_id: Mapped[int] = mapped_column(ForeignKey("annotator.id"))
     query_id: Mapped[int]
     query: Mapped[str]
     page_id: Mapped[int]
@@ -74,8 +73,14 @@ class EvaluationAnnotation(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     __table_args__ = (
-        UniqueConstraint("annotator", "query_id", "page_id", name="uq_annotation"),
+        UniqueConstraint("annotator_id", "query_id", "page_id", name="uq_annotation"),
     )
+
+class Annotator(Base):
+    __tablename__ = "annotator"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(unique=True, index=True)
+    role: Mapped[str]
 
 
 class EvaluationNote(Base):
