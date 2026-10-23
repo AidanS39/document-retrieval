@@ -185,9 +185,9 @@ The evaluation pipeline measures retrieval quality (NDCG) across systems using p
 
 ### Workflow
 
-1. **Run systems** — generate per-system rankings for a query set:
+1. **Run systems** — generate per-system rankings for the active queries in the `query` table:
    ```bash
-   uv run python src/scripts/run_system_ranking.py --system-id 7 --queries-file data/evaluation/queries.json
+   uv run python src/scripts/run_system_ranking.py --system-id 7
    ```
 
 2. **Build query pool** — merge rankings across systems into a pool for annotation:

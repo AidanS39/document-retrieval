@@ -7,9 +7,14 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 from pydantic_ai.messages import BinaryContent
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import URL, create_engine
 from sqlalchemy.orm import Session
+
+from document_retrieval.evaluation import QueryPool
+from document_retrieval.models import Page, Annotator, EvaluationAnnotation, Query
+
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 load_dotenv(Path(__file__).parent.parent / ".env")
@@ -52,7 +57,6 @@ def _build_engine():
 
 
 def _load_pool(pool_path: Path):
-    from document_retrieval.evaluation import QueryPool
     if not pool_path.exists():
         print(f"Error: query pool not found at {pool_path}", file=sys.stderr)
         sys.exit(1)
@@ -60,7 +64,6 @@ def _load_pool(pool_path: Path):
 
 
 def _load_existing(engine, annotator_id: int) -> set[tuple[int, int]]:
-    from document_retrieval.models import EvaluationAnnotation
     with Session(engine) as session:
         rows = session.execute(
             select(EvaluationAnnotation.query_id, EvaluationAnnotation.page_id)
@@ -194,7 +197,6 @@ def main():
     engine = _build_engine()
     pool = _load_pool(args.pool)
 
-    from document_retrieval.models import Annotator
     with Session(engine) as session:
         annotator_obj = session.execute(
             select(Annotator).where(Annotator.name == annotator_name)
@@ -214,10 +216,6 @@ def main():
 
     agent = _build_agent(args.model)
 
-    from document_retrieval.evaluation import AnnotationStore
-    from document_retrieval.models import Page
-
-    store = AnnotationStore(engine)
     annotations_done = 0
 
     for query_entry in pool.queries:
@@ -225,6 +223,13 @@ def main():
         query_text = query_entry["query"]
 
         if args.query_id is not None and query_id != args.query_id:
+            continue
+
+        with Session(engine) as session:
+            query = session.get(Query, query_id)
+
+        if query is None:
+            print(f"Warning: query {query_id} not found, skipping", file=sys.stderr)
             continue
 
         for page_id in query_entry["pooled_page_ids"]:
@@ -248,7 +253,27 @@ def main():
 
             annotation = _annotate_page(agent, query_text, page.image_path)
             if not args.no_store:
-                store.submit(annotator_id, query_id, query_text, page_id, annotation.relevance, annotation.explanation)
+                stmt = (
+                    pg_insert(EvaluationAnnotation)
+                    .values(
+                        annotator_id=annotator_id,
+                        query_id=query.id,
+                        page_id=page_id,
+                        score=annotation.relevance,
+                        explanation=annotation.explanation,
+                    )
+                    .on_conflict_do_update(
+                        constraint="uq_annotation",
+                        set_={
+                            "score": annotation.relevance,
+                            "explanation": annotation.explanation,
+                            "submitted_at": func.now(),
+                        },
+                    )
+                )
+                with Session(engine) as session:
+                    session.execute(stmt)
+                    session.commit()
             annotations_done += 1
             print(f"query={query_id} page={page_id} score={annotation.relevance}  {annotation.explanation}")
 

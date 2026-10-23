@@ -40,7 +40,7 @@ export default function LeftPanel({
 
       <div className="page-list">
         {pages.length === 0 ? (
-          <div style={{ padding: '24px 16px', color: '#666', fontSize: '13px' }}>
+          <div style={{ padding: '24px 16px', color: 'var(--text-muted)', fontSize: '13px' }}>
             Loading pages…
           </div>
         ) : (

@@ -19,7 +19,7 @@ class PDFErrorBoundary extends Component<
   }
   render() {
     if (this.state.hasError) {
-      return <span style={{ color: '#666', padding: '32px' }}>Loading PDF…</span>;
+      return <span style={{ color: 'var(--text-muted)', padding: '32px' }}>Loading PDF…</span>;
     }
     return this.props.children;
   }
@@ -70,8 +70,8 @@ export default function PDFViewer({ pdfUrl, pageNumber }: PDFViewerProps) {
               setNumPages(n);
               setLoadedUrl(debouncedUrl);
             }}
-            loading={<span style={{ color: '#666', padding: '32px' }}>Loading PDF…</span>}
-            error={<span style={{ color: '#e85c5c', padding: '32px' }}>Failed to load PDF</span>}
+            loading={<span style={{ color: 'var(--text-muted)', padding: '32px' }}>Loading PDF…</span>}
+            error={<span style={{ color: 'var(--danger)', padding: '32px' }}>Failed to load PDF</span>}
           >
             {pageReady && (
               <div className="pdf-page-wrapper">

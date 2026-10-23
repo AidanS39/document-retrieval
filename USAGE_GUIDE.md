@@ -241,13 +241,12 @@ The evaluation pipeline scores retrieval quality using NDCG (Normalized Discount
 
 ### Step A — Prepare Queries
 
-Create a JSON file containing an array of query strings at `data/evaluation/queries.json`:
+Queries are stored in the `query` table. Only queries with `active = true` are ranked, shown in the annotator, and included in calculations. To add queries:
 
-```json
-[
-  "What is the confinement time in NSTX experiments?",
-  "Explain the role of neutral beam injection in plasma heating"
-]
+```sql
+INSERT INTO query (fid, text, active) VALUES
+  (1, 'What is the confinement time in NSTX experiments?', true),
+  (2, 'Explain the role of neutral beam injection in plasma heating', true);
 ```
 
 ### Step B — Run Each System Over the Query Set
@@ -257,15 +256,14 @@ For each system you want to evaluate:
 ```bash
 uv run python src/scripts/run_system_ranking.py \
     --system-id 7 \
-    --queries-file data/evaluation/queries.json \
     --top-k 10
 ```
 
-This produces `data/evaluation/systems/system_7.json`. Repeat for every system you want to compare. The `--top-k` flag controls how many pages are retrieved per query (default: 10).
+This ranks every active query in the `query` table and produces `data/evaluation/systems/system_7.json`, with rankings keyed by `query.id`. Repeat for every system you want to compare. The `--top-k` flag controls how many pages are retrieved per query (default: 10).
 
 ### Step C — Build the Annotation Pool
 
-Merge the per-system rankings into a unified pool of pages to annotate:
+Merge the per-system rankings for every active query in the `query` table into a unified pool of pages to annotate:
 
 ```bash
 uv run python src/scripts/setup_evaluation.py
@@ -273,7 +271,6 @@ uv run python src/scripts/setup_evaluation.py
 
 | Flag | Description |
 |------|-------------|
-| `--queries-file` | Path to your queries JSON (default: `$DATA_DIR/evaluation/queries.json`) |
 | `--systems-dir` | Directory containing `system_*.json` files (default: `$DATA_DIR/evaluation/systems`) |
 | `--pool-out` | Output path for `query_pool.json` (default: `$DATA_DIR/evaluation/query_pool.json`) |
 | `--top-k` | How many results per system per query to include in the pool (default: 10) |
@@ -449,10 +446,10 @@ To evaluate multiple systems:
 
 ```bash
 # 7. Create query set
-# Write data/evaluation/queries.json as a JSON array of strings
+# Insert queries into the query table with active = true
 
 # 8. Run each system
-uv run python src/scripts/run_system_ranking.py --system-id <id> --queries-file data/evaluation/queries.json
+uv run python src/scripts/run_system_ranking.py --system-id <id>
 
 # 9. Build annotation pool
 uv run python src/scripts/setup_evaluation.py
@@ -550,13 +547,6 @@ for ranking in rankings:
 | `rank.page.document` | The parent `Document` ORM object |
 | `rank.page.document.name` | Document filename stem |
 | `rank.page.document.path` | Full path to the source file |
-
-`PageRanking` also exposes `to_ranking()`, which serializes the result to a plain Python structure:
-
-```python
-query_str, ranks = ranking.to_ranking()
-# ranks is a list of {"page_id": int, "position": int}
-```
 
 For document-level retrieval (TF-IDF and BM25 doc rankers), the equivalent types are `DocRanking` and `DocRank`, with `rank.doc` instead of `rank.page`.
 

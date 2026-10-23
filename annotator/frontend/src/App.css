@@ -20,10 +20,34 @@
   --focus-ring: #4a9eff;
   --checkmark: #3db87a;
   --danger: #e85c5c;
+  --pdf-bg: #111;
+  --query-complete-bg: rgba(61, 255, 122, 0.3);
+  color-scheme: dark;
   font-family: system-ui, -apple-system, sans-serif;
   font-size: 14px;
   color: var(--text);
   background: var(--bg);
+}
+
+:root[data-theme='light'] {
+  --bg: #e4e4e8;
+  --surface: #ececef;
+  --surface2: #d8d8dd;
+  --border: #9a9aa2;
+  --text: #0a0a0a;
+  --text-muted: #45454d;
+  --accent: #0b63c4;
+  --accent-hover: #1f7ae0;
+  --score-0: #6b6b73;
+  --score-1: #b87400;
+  --score-2: #0b63c4;
+  --score-3: #1d8050;
+  --focus-ring: #0b63c4;
+  --checkmark: #1d8050;
+  --danger: #c43333;
+  --pdf-bg: #c4c4ca;
+  --query-complete-bg: rgba(29, 128, 80, 0.22);
+  color-scheme: light;
 }
 
 html, body, #root {
@@ -55,6 +79,27 @@ html, body, #root {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+}
+
+.theme-toggle-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.theme-toggle-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .header-title {
@@ -294,7 +339,7 @@ kbd {
 }
 
 .query-text-box--complete {
-  background: rgba(61, 255, 122, 0.3);
+  background: var(--query-complete-bg);
 }
 
 .query-text-box-header {
@@ -469,7 +514,7 @@ kbd {
   flex: 1;
   display: flex;
   flex-direction: column;
-  background: #111;
+  background: var(--pdf-bg);
   overflow: hidden;
 }
 

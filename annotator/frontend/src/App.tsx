@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import type { Query, PageInfo, Score, Scores, QueryCompletion } from './types';
 import { fetchQueries, fetchPages, fetchAnnotations, fetchStatus, submitAnnotation, clearAnnotation, fetchNote, submitNote, fetchAnnotatorByName, createAnnotator } from './api';
 import Header from './components/Header';
@@ -7,6 +7,9 @@ import PDFViewer from './components/PDFViewer';
 import Footer from './components/Footer';
 
 export default function App() {
+  const [theme, setTheme] = useState<'dark' | 'light'>(
+    () => localStorage.getItem('theme') === 'light' ? 'light' : 'dark'
+  );
   const [annotatorId, setAnnotatorId] = useState<number | null>(() => {
     const stored = localStorage.getItem('annotatorId');
     return stored ? parseInt(stored, 10) : null;
@@ -32,6 +35,14 @@ export default function App() {
   const [poolMissing, setPoolMissing] = useState(false);
   const [note, setNote] = useState('');
   const noteSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Layout effect so the theme is applied before first paint (no dark→light flash)
+  useLayoutEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => setTheme(t => t === 'dark' ? 'light' : 'dark');
 
   useEffect(() => {
     if (showSignIn && !showCreate) signInInputRef.current?.focus();
@@ -134,18 +145,18 @@ export default function App() {
   // Load note when query or annotator changes
   useEffect(() => {
     if (noteSaveTimer.current) { clearTimeout(noteSaveTimer.current); noteSaveTimer.current = null; }
-    if (!currentQuery || !annotatorName) { setNote(''); return; }
-    fetchNote(annotatorName, currentQuery.id).then(({ note: n }) => setNote(n));
-  }, [currentQuery?.id, annotatorName]);
+    if (!currentQuery || !annotatorId) { setNote(''); return; }
+    fetchNote(annotatorId, currentQuery.id).then(({ note: n }) => setNote(n));
+  }, [currentQuery?.id, annotatorId]);
 
   const handleNoteChange = useCallback((text: string) => {
     setNote(text);
-    if (!currentQuery || !annotatorName) return;
+    if (!currentQuery || !annotatorId) return;
     if (noteSaveTimer.current) clearTimeout(noteSaveTimer.current);
     noteSaveTimer.current = setTimeout(() => {
-      submitNote(annotatorName, currentQuery.id, text);
+      submitNote(annotatorId, currentQuery.id, text);
     }, 600);
-  }, [annotatorName, currentQuery]);
+  }, [annotatorId, currentQuery]);
 
   const focusedPage = pages[focusedPageIdx] ?? null;
 
@@ -280,6 +291,8 @@ export default function App() {
         </div>
       )}
       <Header
+        theme={theme}
+        onToggleTheme={toggleTheme}
         annotator={annotatorName}
         onSignOut={signOut}
         queryIndex={queryIndex}

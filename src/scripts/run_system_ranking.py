@@ -1,13 +1,15 @@
 import argparse
-import json
 import os
 import time
 from pathlib import Path
 
 from dotenv import load_dotenv
+from sqlalchemy import select
 from sqlalchemy.engine import URL, create_engine
+from sqlalchemy.orm import Session
 
 from scripts.config import RETRIEVAL_SYSTEMS, build_ranker, add_device_arg
+from document_retrieval.models import Query
 from document_retrieval.utils import get_device
 
 load_dotenv()
@@ -34,12 +36,6 @@ def main():
         help=f"Retrieval system to run. Choices: {list(RETRIEVAL_SYSTEMS.keys())}",
     )
     parser.add_argument(
-        "--queries-file",
-        type=Path,
-        default=eval_dir / "queries.json",
-        help="JSON file containing a list of query strings (default: $DATA_DIR/evaluation/queries.json)",
-    )
-    parser.add_argument(
         "--top-k",
         type=int,
         default=10,
@@ -54,12 +50,6 @@ def main():
     add_device_arg(parser)
     args = parser.parse_args()
 
-    with open(args.queries_file) as f:
-        queries = json.load(f)
-
-    if not isinstance(queries, list) or not all(isinstance(q, str) for q in queries):
-        raise ValueError(f"{args.queries_file} must contain a JSON array of strings")
-
     conn_url = URL.create(
         drivername=DB_DRIVER,
         username=DB_USER,
@@ -71,6 +61,13 @@ def main():
     engine = create_engine(conn_url)
     device = get_device(args.device)
 
+    # id and text stay loaded after the session closes, which is all the rankers need
+    with Session(engine) as session:
+        queries = list(session.scalars(select(Query).where(Query.active).order_by(Query.id)).all())
+
+    if not queries:
+        raise ValueError("No active queries found in the query table")
+
     system = RETRIEVAL_SYSTEMS[args.system_id]
     system.top_k = args.top_k
     print(f"Running system: {system.name}")
@@ -79,13 +76,14 @@ def main():
     ranker = build_ranker(args.system_id, engine, device, Path(os.getenv("DATA_DIR", "/app/data")))
 
     t0 = time.perf_counter()
-    rankings = ranker.rank(queries, top_k=args.top_k)
+    rankings = ranker.rank([query.text for query in queries], top_k=args.top_k)
     elapsed = time.perf_counter() - t0
 
-    for page_ranking in rankings:
-        query, ranks = page_ranking.to_ranking()
-        system.add_ranking(query, ranks)
-        print(f"  ranked {len(ranks)} pages for: {query[:70]!r}")
+    # rankings are returned in the same order as the queries passed in
+    for query, page_ranking in zip(queries, rankings):
+        ranks = [{"page_id": rank.page.id, "position": rank.position} for rank in page_ranking.ranks]
+        system.add_ranking(query.id, ranks)
+        print(f"  ranked {len(ranks)} pages for query {query.id}: {query.text[:70]!r}")
 
     avg_ms = elapsed / len(queries) * 1000
     print(f"\nTotal rank time: {elapsed:.3f}s  |  Avg per query: {avg_ms:.1f}ms  ({len(queries)} queries)")

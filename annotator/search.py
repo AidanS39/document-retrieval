@@ -157,7 +157,7 @@ def cmd_pages(args, pool, engine):
 # ── annotations ───────────────────────────────────────────────────────────────
 
 def _data_annotations(args, pool, engine):
-    from document_retrieval.models import Annotator, Document, EvaluationAnnotation, Page
+    from document_retrieval.models import Annotator, Document, EvaluationAnnotation, Page, Query
 
     # Detailed view: specific annotator + query, includes unannotated pool pages
     if args.annotator is not None and args.query_id is not None:
@@ -227,12 +227,13 @@ def _data_annotations(args, pool, engine):
             select(
                 Annotator.name,
                 EvaluationAnnotation.query_id,
-                EvaluationAnnotation.query,
+                Query.text.label("query"),
                 EvaluationAnnotation.page_id,
                 EvaluationAnnotation.score,
                 EvaluationAnnotation.submitted_at,
             )
             .join(Annotator, EvaluationAnnotation.annotator_id == Annotator.id)
+            .join(Query, EvaluationAnnotation.query_id == Query.id)
         )
         if args.annotator is not None:
             stmt = stmt.where(Annotator.name == args.annotator)
@@ -393,20 +394,21 @@ def cmd_status(args, pool, engine):
 # ── notes ─────────────────────────────────────────────────────────────────────
 
 def _data_notes(args, pool, engine):
-    from document_retrieval.models import EvaluationNote
+    from document_retrieval.models import Annotator, EvaluationNote
 
     with Session(engine) as session:
         stmt = (
             select(
-                EvaluationNote.annotator,
+                Annotator.name.label("annotator"),
                 EvaluationNote.query_id,
                 EvaluationNote.note,
                 EvaluationNote.updated_at,
             )
+            .join(Annotator, EvaluationNote.annotator_id == Annotator.id)
             .where(EvaluationNote.note != "")
         )
         if args.annotator is not None:
-            stmt = stmt.where(EvaluationNote.annotator == args.annotator)
+            stmt = stmt.where(Annotator.name == args.annotator)
         if args.query_id is not None:
             stmt = stmt.where(EvaluationNote.query_id == args.query_id)
         rows = session.execute(stmt).all()

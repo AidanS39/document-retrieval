@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from document_retrieval.evaluation import QueryPool
-from document_retrieval.models import Annotator, Document, EvaluationAnnotation, EvaluationNote, Page
+from document_retrieval.models import Annotator, Document, EvaluationAnnotation, EvaluationNote, Page, Query
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
@@ -69,7 +69,7 @@ class AnnotationRequest(BaseModel):
 
 
 class NoteRequest(BaseModel):
-    annotator: str
+    annotator_id: int
     query_id: int
     note: str
 
@@ -108,9 +108,12 @@ def create_annotator(req: CreateAnnotatorRequest):
 def get_queries():
     if pool is None:
         raise HTTPException(503, "Query pool not loaded — run setup_evaluation.py first")
+    with Session(engine) as session:
+        active_ids = set(session.execute(select(Query.id).where(Query.active == True)).scalars())
     return [
         {"id": q["id"], "query": q["query"], "page_count": len(q["pooled_page_ids"])}
         for q in pool.queries
+        if q["id"] in active_ids
     ]
 
 
@@ -177,12 +180,11 @@ def submit_annotation(req: AnnotationRequest):
         .values(
             annotator_id=req.annotator_id,
             query_id=req.query_id,
-            query=entry["query"],
             page_id=req.page_id,
             score=req.score,
         )
         .on_conflict_do_update(
-            index_elements=["annotator_id", "query_id", "page_id"],
+            constraint="uq_annotation",
             set_={"score": req.score, "submitted_at": func.now()},
         )
     )
@@ -206,10 +208,12 @@ def delete_annotation(annotator_id: int, query_id: int, page_id: int):
 
 @app.get("/api/status/{annotator_id}")
 def get_annotator_status(annotator_id: int):
-    """Returns {query_id: annotated_page_count} for the given annotator, counting only pool pages."""
+    """Returns {query_id: annotated_page_count} for the given annotator, counting only active pool pages."""
     if pool is None:
         return {}
-    pool_page_ids = {q["id"]: set(q["pooled_page_ids"]) for q in pool.queries}
+    with Session(engine) as session:
+        active_ids = set(session.execute(select(Query.id).where(Query.active == True)).scalars())
+    pool_page_ids = {q["id"]: set(q["pooled_page_ids"]) for q in pool.queries if q["id"] in active_ids}
     with Session(engine) as session:
         rows = session.execute(
             select(EvaluationAnnotation.query_id, EvaluationAnnotation.page_id)
@@ -222,12 +226,12 @@ def get_annotator_status(annotator_id: int):
     return counts
 
 
-@app.get("/api/notes/{annotator}/{query_id}")
-def get_note(annotator: str, query_id: int):
+@app.get("/api/notes/{annotator_id}/{query_id}")
+def get_note(annotator_id: int, query_id: int):
     with Session(engine) as session:
         row = session.execute(
             select(EvaluationNote.note)
-            .where(EvaluationNote.annotator == annotator, EvaluationNote.query_id == query_id)
+            .where(EvaluationNote.annotator_id == annotator_id, EvaluationNote.query_id == query_id)
         ).first()
     return {"note": row.note if row else ""}
 
@@ -237,12 +241,12 @@ def upsert_note(req: NoteRequest):
     with Session(engine) as session:
         existing = session.execute(
             select(EvaluationNote)
-            .where(EvaluationNote.annotator == req.annotator, EvaluationNote.query_id == req.query_id)
+            .where(EvaluationNote.annotator_id == req.annotator_id, EvaluationNote.query_id == req.query_id)
         ).scalar_one_or_none()
         if existing:
             existing.note = req.note
         else:
-            session.add(EvaluationNote(annotator=req.annotator, query_id=req.query_id, note=req.note))
+            session.add(EvaluationNote(annotator_id=req.annotator_id, query_id=req.query_id, note=req.note))
         session.commit()
 
 

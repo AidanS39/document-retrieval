@@ -8,6 +8,8 @@ const SCORE_DESCRIPTIONS = [
 ];
 
 interface HeaderProps {
+  theme: 'dark' | 'light';
+  onToggleTheme: () => void;
   annotator: string;
   onSignOut: () => void;
   queryIndex: number;
@@ -16,6 +18,8 @@ interface HeaderProps {
 }
 
 export default function Header({
+  theme,
+  onToggleTheme,
   annotator,
   onSignOut,
   queryIndex,
@@ -55,6 +59,13 @@ export default function Header({
             {queryComplete && <span className="query-complete-badge">✓</span>}
           </span>
         )}
+        <button
+          className="theme-toggle-btn"
+          onClick={onToggleTheme}
+          title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+        >
+          {theme === 'dark' ? '☀' : '☾'}
+        </button>
       </header>
 
       {showInfo && (

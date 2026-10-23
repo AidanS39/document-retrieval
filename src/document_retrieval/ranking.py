@@ -63,8 +63,6 @@ class PageRank:
         self.position = position
         self.score = score
 
-
-
 class PageRanking:
     def __init__(self, query: str, ranks: list[PageRank]):
         self.query = query
@@ -81,9 +79,6 @@ class PageRanking:
                 f"{rank.position:<6} {rank.score:<10.4f} {rank.page.id:<6} {rank.page.document.name:<20} {rank.page.number}"
             )
         return "\n".join(lines)
-
-    def to_ranking(self) -> tuple[str, list[dict[str, int]]]:
-        return self.query, [{"page_id": rank.page.id, "position": rank.position} for rank in self.ranks]
 
     @classmethod
     def from_tuples(cls, query: str, rank_tuples: list[tuple[int, float]], engine):

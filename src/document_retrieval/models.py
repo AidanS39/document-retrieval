@@ -37,6 +37,7 @@ class Page(Base):
         ForeignKey("document.id", ondelete="CASCADE")
     )
     document: Mapped["Document"] = relationship(back_populates="pages")
+    annotations: Mapped[List["EvaluationAnnotation"]] = relationship(back_populates="page")
     image_path: Mapped[str] = mapped_column(unique=True)
     number: Mapped[int]
     text: Mapped[Optional[str]]
@@ -59,14 +60,31 @@ class Page(Base):
         ),
     )
 
+class Annotator(Base):
+    __tablename__ = "annotator"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(unique=True, index=True)
+    role: Mapped[str]
+    annotations: Mapped[List["EvaluationAnnotation"]] = relationship(back_populates="annotator")
+    notes: Mapped[List["EvaluationNote"]] = relationship(back_populates="annotator")
+
+class Query(Base):
+    __tablename__ = "query"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    text: Mapped[str]
+    active: Mapped[bool]
+    annotations: Mapped[List["EvaluationAnnotation"]] = relationship(back_populates="query")
+    notes: Mapped[List["EvaluationNote"]] = relationship(back_populates="query")
 
 class EvaluationAnnotation(Base):
     __tablename__ = "evaluation_annotation"
     id: Mapped[int] = mapped_column(primary_key=True)
     annotator_id: Mapped[int] = mapped_column(ForeignKey("annotator.id"))
-    query_id: Mapped[int]
-    query: Mapped[str]
-    page_id: Mapped[int]
+    annotator: Mapped[Annotator] = relationship(back_populates="annotations")
+    query_id: Mapped[int] = mapped_column(ForeignKey("query.id"))
+    query: Mapped[Query] = relationship(back_populates="annotations")
+    page_id: Mapped[int] = mapped_column(ForeignKey("page.id"))
+    page: Mapped[Page] = relationship(back_populates="annotations")
     score: Mapped[int]
     explanation: Mapped[str] = mapped_column(server_default="")
     submitted_at: Mapped[datetime] = mapped_column(
@@ -76,22 +94,17 @@ class EvaluationAnnotation(Base):
         UniqueConstraint("annotator_id", "query_id", "page_id", name="uq_annotation"),
     )
 
-class Annotator(Base):
-    __tablename__ = "annotator"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(unique=True, index=True)
-    role: Mapped[str]
-
-
 class EvaluationNote(Base):
     __tablename__ = "evaluation_note"
     id: Mapped[int] = mapped_column(primary_key=True)
-    annotator: Mapped[str]
-    query_id: Mapped[int]
+    annotator_id: Mapped[int] = mapped_column(ForeignKey("annotator.id"))
+    annotator: Mapped[Annotator] = relationship(back_populates="notes")
+    query_id: Mapped[int] = mapped_column(ForeignKey("query.id"))
+    query: Mapped[Query] = relationship(back_populates="notes")
     note: Mapped[str] = mapped_column(default="")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
     __table_args__ = (
-        UniqueConstraint("annotator", "query_id", name="uq_note"),
+        UniqueConstraint("annotator_id", "query_id", name="uq_note"),
     )

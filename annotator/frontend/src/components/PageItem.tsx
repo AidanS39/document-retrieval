@@ -56,7 +56,7 @@ export default function PageItem({ page, scores, focused, onFocus, onScore, onCl
           Document: <span>{page.document_name}</span><br />
           Page: <span>{page.page_number}</span><br />
           Score: <span>{scored ? currentScore : 'unscored'}</span><br />
-          <span style={{ color: '#555', fontSize: '11px' }}>Keys 0–3 to score · ↑↓ to navigate</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>Keys 0–3 to score · ↑↓ to navigate</span>
         </div>
       )}
     </div>

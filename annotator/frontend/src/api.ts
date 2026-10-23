@@ -50,12 +50,12 @@ export const clearAnnotation = (
     method: 'DELETE',
   });
 
-export const fetchNote = (annotator: string, queryId: number): Promise<{ note: string }> =>
-  request(`/api/notes/${encodeURIComponent(annotator)}/${queryId}`);
+export const fetchNote = (annotatorId: number, queryId: number): Promise<{ note: string }> =>
+  request(`/api/notes/${annotatorId}/${queryId}`);
 
-export const submitNote = (annotator: string, queryId: number, note: string): Promise<void> =>
+export const submitNote = (annotatorId: number, queryId: number, note: string): Promise<void> =>
   request('/api/notes', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ annotator, query_id: queryId, note }),
+    body: JSON.stringify({ annotator_id: annotatorId, query_id: queryId, note }),
   });
